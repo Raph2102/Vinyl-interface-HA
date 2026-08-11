@@ -12746,7 +12746,7 @@ function z1({ embedded: f } = {}) {
     const X = setInterval(async () => {
       try {
         const gt = await (await fetch(`./version.json?_=${Date.now()}`, { cache: "no-store" })).json();
-        gt.build && gt.build !== "1786482955910" && window.location.reload();
+        gt.build && gt.build !== "1786483719529" && window.location.reload();
       } catch {
       }
     }, 9e5);

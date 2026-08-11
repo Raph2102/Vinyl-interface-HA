@@ -1,11 +1,16 @@
 {
   "domain": "md_vinyl",
   "name": "MD Vinyl",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "documentation": "https://github.com/Raph2102/Vinyl-interface-HA",
   "issue_tracker": "https://github.com/Raph2102/Vinyl-interface-HA/issues",
-  "codeowners": ["@Raph2102"],
-  "dependencies": ["http", "panel_custom"],
+  "codeowners": [
+    "@Raph2102"
+  ],
+  "dependencies": [
+    "http",
+    "panel_custom"
+  ],
   "requirements": [],
   "config_flow": true,
   "integration_type": "service",

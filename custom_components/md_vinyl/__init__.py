@@ -19,15 +19,15 @@ Pourquoi une intégration plutôt qu'un simple module Lovelace :
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 
-from homeassistant.components import panel_custom
+from homeassistant.components import frontend, panel_custom
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN, PANEL_ICON, PANEL_TITLE, PANEL_URL, STATIC_URL, WEBCOMPONENT
 
@@ -36,14 +36,9 @@ _LOGGER = logging.getLogger(__name__)
 FRONTEND_DIR = Path(__file__).parent / "frontend"
 BUNDLE = "md-vinyl-panel.js"
 
-
-def _version() -> str:
-    """Version déclarée dans le manifeste, utilisée pour casser le cache."""
-    try:
-        manifest = json.loads((Path(__file__).parent / "manifest.json").read_text("utf-8"))
-        return str(manifest.get("version", "0"))
-    except (OSError, ValueError):
-        return "0"
+# Le dossier statique ne s'enregistre qu'une fois par démarrage : le refaire
+# après un rechargement de l'intégration ferait doublon dans le routeur.
+SERVED = f"{DOMAIN}_static_served"
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -53,31 +48,47 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Sert le module et pose l'entrée dans la barre latérale."""
-    bundle = FRONTEND_DIR / BUNDLE
-    if not bundle.is_file():
+    """
+    La version vient du manifeste DÉJÀ CHARGÉ par Home Assistant.
+
+    Le lire nous-mêmes avec Path.read_text revenait à faire un accès disque
+    depuis la boucle d'événements — Home Assistant le détecte et le signale,
+    à juste titre : pendant cette lecture, plus rien d'autre ne peut avancer.
+    async_get_integration rend le manifeste déjà en mémoire, sans toucher au
+    disque.
+    """
+    integration = await async_get_integration(hass, DOMAIN)
+    version = str(integration.version or "0")
+
+    # Même précaution que pour le manifeste : un accès disque, si bref soit-il,
+    # ne se fait pas depuis la boucle d'événements.
+    present = await hass.async_add_executor_job(FRONTEND_DIR.joinpath(BUNDLE).is_file)
+    if not present:
         _LOGGER.error(
-            "Module introuvable : %s. L'installation est incomplète — "
+            "Module introuvable dans %s. L'installation est incomplète — "
             "réinstalle l'intégration depuis HACS.",
-            bundle,
+            FRONTEND_DIR,
         )
         return False
 
-    version = _version()
-
     # Le dossier entier est exposé, et non le seul fichier : cela laisse la
-    # place aux ressources qu'on pourrait vouloir livrer plus tard sans
-    # retoucher à l'enregistrement.
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
-    )
+    # place aux ressources qu'on pourrait livrer plus tard sans retoucher à
+    # l'enregistrement.
+    if not hass.data.get(SERVED):
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(STATIC_URL, str(FRONTEND_DIR), cache_headers=False)]
+        )
+        hass.data[SERVED] = True
 
     """
-    L'enregistrement est fait à chaque démarrage, et c'est voulu.
-
     Un panneau n'est pas persisté par Home Assistant : il vit le temps d'une
-    exécution. `update=True` évite l'erreur si une entrée du même nom subsiste
-    d'un rechargement à chaud de l'intégration.
+    exécution, et il faut donc le réenregistrer à chaque démarrage.
+
+    On retire d'abord une éventuelle entrée du même nom. Sans cela, recharger
+    l'intégration sans redémarrer se solderait par un refus d'écrasement.
     """
+    frontend.async_remove_panel(hass, PANEL_URL, warn_if_unknown=False)
+
     await panel_custom.async_register_panel(
         hass,
         webcomponent_name=WEBCOMPONENT,
@@ -90,7 +101,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # d'administrateur — le frontend le dit clairement le cas échéant.
         require_admin=False,
         config={"version": version},
-        update=True,
     )
 
     _LOGGER.info("MD Vinyl %s : panneau disponible sur /%s", version, PANEL_URL)
@@ -99,5 +109,5 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Retire le panneau quand on désinstalle l'intégration."""
-    panel_custom.async_remove_panel(hass, PANEL_URL)
+    frontend.async_remove_panel(hass, PANEL_URL, warn_if_unknown=False)
     return True
