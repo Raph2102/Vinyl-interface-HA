@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MD Vinyl",
+        "description": "La platine s'ajoutera à la barre latérale sous le nom **Vinyl**.\n\nIl n'y a rien d'autre à configurer : elle utilise la session de Home Assistant, choisit d'elle-même une enceinte et se connecte à Music Assistant."
+      }
+    },
+    "abort": {
+      "already_configured": "MD Vinyl est déjà installé."
+    }
+  }
+}

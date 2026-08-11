@@ -1,0 +1,19 @@
+.env
+node_modules/
+dist/
+tools/out/
+*.local
+
+# Références locales, jamais publiées.
+#
+# Ce sont les fichiers de l'application MD Vinyl et ses captures d'écran. Ils
+# ont servi de mètre-ruban — relever la géométrie du bras, les proportions de
+# l'étiquette — et rien d'autre. Ils ne nous appartiennent pas : les publier
+# reviendrait à redistribuer le travail de quelqu'un d'autre.
+*.apk
+*.xapk
+1.jpg
+3.jpg
+5.jpg
+md-vinyl.jpg
+OIP.webp

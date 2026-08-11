@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "MD Vinyl",
+        "description": "The turntable will be added to the sidebar as **Vinyl**.\n\nThere is nothing else to configure: it uses your Home Assistant session, picks a speaker on its own and connects to Music Assistant."
+      }
+    },
+    "abort": {
+      "already_configured": "MD Vinyl is already installed."
+    }
+  }
+}

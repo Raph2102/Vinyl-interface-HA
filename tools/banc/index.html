@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>banc du panneau</title>
+<style>
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: #111;
+  }
+  md-vinyl-panel {
+    display: block;
+    height: 100vh;
+  }
+</style>
+<md-vinyl-panel id="p"></md-vinyl-panel>
+<script type="module">
+  /*
+   * Banc d'essai du panneau, sans installer quoi que ce soit.
+   *
+   * On ne charge QUE le module livré, et on lui donne un objet `hass` dans la
+   * forme exacte du frontend de Home Assistant. Deux façons de l'alimenter :
+   *
+   *   /                    un état fabriqué à la main, hors ligne ;
+   *   /?ha=<url>&token=…   une VRAIE liaison WebSocket vers une instance.
+   *
+   * La seconde est ce qui permet de vérifier le panneau contre une vraie
+   * installation avant de le déposer dedans.
+   *
+   * Il vit dans tools/ et non dans dist-panel/, que la construction vide.
+   */
+  window.__chargement = "en cours";
+  try {
+    await import("/md-vinyl-panel.js?v=" + Date.now());
+    window.__chargement = "ok";
+  } catch (e) {
+    window.__chargement = "ERREUR " + (e && e.stack ? e.stack : e);
+  }
+
+  const params = new URLSearchParams(location.search);
+  const HA = params.get("ha");
+  const TOKEN = params.get("token");
+  const panneau = document.getElementById("p");
+
+  if (!HA) {
+    // Hors ligne : un seul lecteur, figé.
+    panneau.hass = {
+      states: {
+        "media_player.banc": {
+          entity_id: "media_player.banc",
+          state: "playing",
+          attributes: {
+            friendly_name: "Banc d'essai",
+            supported_features: 84479,
+            media_title: "Morceau de banc",
+            media_artist: "Essai",
+            media_album_name: "Album d'essai",
+            media_duration: 240,
+            media_position: 30,
+            media_position_updated_at: new Date().toISOString(),
+            volume_level: 0.4,
+            mass_player_type: "player",
+          },
+        },
+      },
+      callService: async () => null,
+      callWS: async () => [],
+      user: { is_admin: true },
+    };
+    window.__pret = true;
+  } else {
+    window.__pret = false;
+    window.__erreur = null;
+
+    const sock = new WebSocket(HA.replace(/^http/, "ws") + "/api/websocket");
+    let id = 1;
+    const attente = new Map();
+    const etats = {};
+
+    const envoyer = (msg) =>
+      new Promise((res, rej) => {
+        const i = id++;
+        attente.set(i, { res, rej });
+        sock.send(JSON.stringify({ ...msg, id: i }));
+      });
+
+    const pousser = () => {
+      panneau.hass = {
+        states: { ...etats },
+        callService: (domain, service, data, target) =>
+          envoyer({
+            type: "call_service",
+            domain,
+            service,
+            service_data: data ?? {},
+            ...(target ? { target } : {}),
+          }),
+        callWS: (msg) => envoyer(msg),
+        user: { is_admin: true },
+        language: "fr",
+      };
+    };
+
+    sock.onmessage = async (e) => {
+      const m = JSON.parse(e.data);
+      if (m.type === "auth_required") {
+        sock.send(JSON.stringify({ type: "auth", access_token: TOKEN }));
+        return;
+      }
+      if (m.type === "auth_invalid") {
+        window.__erreur = "jeton refusé";
+        return;
+      }
+      if (m.type === "auth_ok") {
+        const liste = await envoyer({ type: "get_states" });
+        for (const s of liste) etats[s.entity_id] = s;
+        await envoyer({ type: "subscribe_events", event_type: "state_changed" });
+        pousser();
+        window.__pret = true;
+        return;
+      }
+      if (m.type === "event" && m.event?.data?.new_state) {
+        etats[m.event.data.entity_id] = m.event.data.new_state;
+        pousser();
+        return;
+      }
+      if (m.type === "result") {
+        const p = attente.get(m.id);
+        if (!p) return;
+        attente.delete(m.id);
+        if (m.success) p.res(m.result);
+        else p.rej(new Error(m.error?.message ?? "erreur"));
+      }
+    };
+  }
+</script>

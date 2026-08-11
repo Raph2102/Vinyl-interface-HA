@@ -1,0 +1,32 @@
+{
+  "name": "md-vinyl-ha",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Platine vinyle virtuelle pour Home Assistant + Music Assistant (Deezer)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "discover": "node tools/discover.mjs",
+    "check:gestures": "node tools/check-gestures.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "fake-ha": "node tools/fake-ha.mjs",
+    "check:ha": "node tools/check-ha.mjs",
+    "diagnose": "node tools/diagnose.mjs",
+    "check:real": "node tools/check-real.mjs",
+    "build:panel": "tsc --noEmit && vite build --mode panel",
+    "banc:panel": "node tools/banc/serve.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.1.0"
+  }
+}
