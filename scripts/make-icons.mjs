@@ -108,27 +108,122 @@ function render(size) {
   return rgba;
 }
 
+/**
+ * Dessin de l'icône.
+ *
+ * La première version était un disque noir sur fond presque noir : correcte de
+ * loin, illisible en petit et invisible sur une interface sombre — c'est-à-dire
+ * partout où elle sert. Une icône doit se reconnaître à seize pixels, dans une
+ * barre latérale, du coin de l'œil.
+ *
+ * Trois décisions en découlent :
+ *
+ *  - un FOND CHAUD, qui détache la vignette de tout ce qui l'entoure ;
+ *  - un DISQUE MARBRÉ, la matière par défaut de l'app, et la seule qui reste
+ *    reconnaissable une fois réduite — un aplat noir ne raconte rien ;
+ *  - un BRAS DE LECTURE en diagonale, qui dit « platine » plutôt que
+ *    « rondelle », et donne à la silhouette un axe que l'œil accroche.
+ */
+
+/** Bruit doux et déterministe : les marbrures d'une image à l'autre sont les mêmes. */
+function bruit(x, y) {
+  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function marbrure(dx, dy, R) {
+  // Trois échelles superposées : la grande donne le mouvement, les petites
+  // cassent les bords pour qu'aucune tache ne paraisse dessinée au compas.
+  const e = R / 7;
+  let v = 0;
+  let amplitude = 1;
+  let echelle = 1;
+  for (let i = 0; i < 3; i++) {
+    const x = (dx / e) * echelle;
+    const y = (dy / e) * echelle;
+    const xi = Math.floor(x);
+    const yi = Math.floor(y);
+    const fx = x - xi;
+    const fy = y - yi;
+    // Interpolation douce entre les quatre coins de la maille.
+    const lisse = (t) => t * t * (3 - 2 * t);
+    const a = bruit(xi, yi);
+    const b = bruit(xi + 1, yi);
+    const c = bruit(xi, yi + 1);
+    const d2 = bruit(xi + 1, yi + 1);
+    const haut = a + (b - a) * lisse(fx);
+    const bas = c + (d2 - c) * lisse(fx);
+    v += (haut + (bas - haut) * lisse(fy)) * amplitude;
+    amplitude *= 0.5;
+    echelle *= 2.4;
+  }
+  return v / 1.75;
+}
+
 function shade(d, dx, dy, R, labelR, holeR) {
-  // Fond : léger dégradé pour que l'icône ne soit pas un aplat mort.
-  const t = Math.min(1, d / (R * 2));
-  let base = [26 - 8 * t, 27 - 8 * t, 31 - 9 * t, 255];
+  const S = R * 2;
 
-  if (d > R) return base;
+  /*
+   * Fond : un dégradé chaud en diagonale, celui de la platine quand une pochette
+   * orangée l'éclaire. C'est lui qui rend la vignette reconnaissable de loin.
+   */
+  const t = Math.min(1, Math.max(0, (dx + dy + S) / (S * 2)));
+  const fond = [
+    Math.round(58 - 26 * t),
+    Math.round(30 - 14 * t),
+    Math.round(24 - 12 * t),
+    255,
+  ];
 
-  if (d < holeR) return [30, 32, 38, 255];
+  // Le bras : une barre fine en diagonale, depuis le coin haut droit.
+  const bras = (() => {
+    const ux = 0.62;
+    const uy = -0.78;
+    const le = dx * ux + dy * uy;
+    const tr = dx * uy - dy * ux;
+    if (le < labelR * 0.95 || le > R * 1.34) return null;
+    const demi = le > R * 1.16 ? R * 0.1 : R * 0.045;
+    if (Math.abs(tr) > demi) return null;
+    const clair = 1 - Math.abs(tr) / demi;
+    const n = Math.round(150 + 70 * clair);
+    return [n, n + 4, n + 10, 255];
+  })();
+
+  if (d > R) return bras ?? fond;
+
+  if (d < holeR) return [26, 14, 11, 255];
 
   if (d < labelR) {
-    // Étiquette crème, avec une ombre douce sur le bord percé.
-    const shadow = d < holeR * 2.2 ? 14 : 0;
-    return [246 - shadow, 243 - shadow, 236 - shadow, 255];
+    const ombre = d < holeR * 2.1 ? 16 : 0;
+    return bras ?? [247 - ombre, 244 - ombre, 237 - ombre, 255];
   }
 
-  // Vinyle : noir profond, sillons concentriques, reflet en diagonale.
-  const groove = Math.sin(d * 1.9) * 0.5 + 0.5;
+  /*
+   * Le disque. Une base claire, la couleur coulée par-dessus à travers la
+   * marbrure, puis les sillons et un reflet — dans cet ordre, comme sur la
+   * platine elle-même.
+   */
+  const m = marbrure(dx, dy, R);
+  const melange = Math.min(1, Math.max(0, (m - 0.37) * 2.7));
+
+  const creme = [243, 238, 229];
+  const teinte = [183, 66, 33];
+  let c = [
+    creme[0] + (teinte[0] - creme[0]) * melange,
+    creme[1] + (teinte[1] - creme[1]) * melange,
+    creme[2] + (teinte[2] - creme[2]) * melange,
+  ];
+
+  // Sillons : une modulation fine, jamais assez forte pour brouiller la marbrure.
+  const sillon = (Math.sin(d * 2.3) * 0.5 + 0.5) * 7 - 3.5;
+  // Reflet venu du haut droit, comme la lumière de la scène.
   const angle = Math.atan2(dy, dx);
-  const sheen = Math.max(0, Math.cos(angle - 2.2)) ** 6 * 46;
-  const level = 14 + groove * 9 + sheen;
-  return [level, level + 1, level + 3, 255];
+  const reflet = Math.max(0, Math.cos(angle - 2.35)) ** 5 * 34;
+  // Assombrissement vers le bord : le disque s'arrondit au lieu d'être un aplat.
+  const bord = (d / R) ** 3 * 26;
+
+  c = c.map((v) => Math.round(Math.min(255, Math.max(0, v + sillon + reflet - bord))));
+  return bras ?? [c[0], c[1], c[2], 255];
 }
 
 for (const size of [180, 256, 512]) {
