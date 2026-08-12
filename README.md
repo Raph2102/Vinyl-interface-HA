@@ -222,6 +222,10 @@ que le panneau corrige.
 
 ## Remerciements
 
+Les pochettes visibles sur les captures viennent d'une bibliothèque Deezer
+personnelle ; elles appartiennent à leurs ayants droit et ne servent ici qu'à
+montrer l'interface.
+
 L'application [MD Vinyl](https://play.google.com/store/apps/details?id=tech.miidii.mdvinyl_android)
 a servi de référence visuelle. Aucun de ses fichiers n'est redistribué ici : ses
 images ont servi de mètre-ruban pour relever des proportions, rien de plus.

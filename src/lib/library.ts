@@ -11,6 +11,7 @@
  */
 
 import { generateCover } from "./covers";
+import { injectedAlbums } from "./demo";
 import type { PlayerClient } from "./types";
 
 export interface Album {
@@ -265,6 +266,17 @@ const DEMO_ALBUMS: [string, string][] = [
 export function demoLibrary(client: PlayerClient, entityId: string): LibrarySource {
   return {
     async albums() {
+      // De vraies pochettes ont pu être posées pour une session de captures.
+      const vraies = injectedAlbums();
+      if (vraies) {
+        return vraies.map((a) => ({
+          uri: `demo://album/${encodeURIComponent(a.name)}/${encodeURIComponent(a.artist)}`,
+          name: a.name,
+          artist: a.artist,
+          image: a.image,
+        }));
+      }
+
       return DEMO_ALBUMS.map(([name, artist]) => ({
         uri: `demo://album/${encodeURIComponent(name)}/${encodeURIComponent(artist)}`,
         name,

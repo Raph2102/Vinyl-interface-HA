@@ -71,9 +71,12 @@ const SS = 4;
 function render(size) {
   const rgba = Buffer.alloc(size * size * 4);
   const c = size / 2;
-  const R = size * 0.44; // rayon du disque
-  const labelR = R * 0.34;
-  const holeR = R * 0.045;
+  // Le disque occupe presque toute la vignette : une icone qui flotte au milieu
+  // de son cadre parait plus petite que ses voisines dans une barre laterale.
+  const R = size * 0.46;
+  // Etiquette genereuse : c est elle qui porte la lecture en petit.
+  const labelR = R * 0.38;
+  const holeR = R * 0.05;
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -111,119 +114,80 @@ function render(size) {
 /**
  * Dessin de l'icône.
  *
- * La première version était un disque noir sur fond presque noir : correcte de
- * loin, illisible en petit et invisible sur une interface sombre — c'est-à-dire
- * partout où elle sert. Une icône doit se reconnaître à seize pixels, dans une
- * barre latérale, du coin de l'œil.
+ * Deux versions ont précédé celle-ci, et chacune a échoué pour la même raison
+ * de fond : elles cherchaient à MONTRER un disque au lieu d'en donner la
+ * silhouette.
  *
- * Trois décisions en découlent :
+ *  - un vinyle noir sur fond presque noir : rien ne se détachait ;
+ *  - un vinyle marbré : joli en grand, une bouillie beige en petit — une
+ *    texture ne survit pas à la réduction.
  *
- *  - un FOND CHAUD, qui détache la vignette de tout ce qui l'entoure ;
- *  - un DISQUE MARBRÉ, la matière par défaut de l'app, et la seule qui reste
- *    reconnaissable une fois réduite — un aplat noir ne raconte rien ;
- *  - un BRAS DE LECTURE en diagonale, qui dit « platine » plutôt que
- *    « rondelle », et donne à la silhouette un axe que l'œil accroche.
+ * Une icône se lit à seize pixels, du coin de l'œil, dans une barre latérale.
+ * Ce qui survit à cette taille, ce n'est ni la matière ni le détail : c'est le
+ * CONTRASTE entre deux formes simples. D'où le parti pris ici — un anneau
+ * presque noir, une pastille orange franche au centre, et rien d'autre. La même
+ * lecture qu'un vrai 45 tours vu de loin : un trou de couleur dans un disque
+ * sombre.
+ *
+ * Le halo chaud derrière n'est pas décoratif : il détache le noir du disque de
+ * tous les fonds sombres sur lesquels l'icône va se poser.
  */
-
-/** Bruit doux et déterministe : les marbrures d'une image à l'autre sont les mêmes. */
-function bruit(x, y) {
-  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-  return n - Math.floor(n);
-}
-
-function marbrure(dx, dy, R) {
-  // Trois échelles superposées : la grande donne le mouvement, les petites
-  // cassent les bords pour qu'aucune tache ne paraisse dessinée au compas.
-  const e = R / 7;
-  let v = 0;
-  let amplitude = 1;
-  let echelle = 1;
-  for (let i = 0; i < 3; i++) {
-    const x = (dx / e) * echelle;
-    const y = (dy / e) * echelle;
-    const xi = Math.floor(x);
-    const yi = Math.floor(y);
-    const fx = x - xi;
-    const fy = y - yi;
-    // Interpolation douce entre les quatre coins de la maille.
-    const lisse = (t) => t * t * (3 - 2 * t);
-    const a = bruit(xi, yi);
-    const b = bruit(xi + 1, yi);
-    const c = bruit(xi, yi + 1);
-    const d2 = bruit(xi + 1, yi + 1);
-    const haut = a + (b - a) * lisse(fx);
-    const bas = c + (d2 - c) * lisse(fx);
-    v += (haut + (bas - haut) * lisse(fy)) * amplitude;
-    amplitude *= 0.5;
-    echelle *= 2.4;
-  }
-  return v / 1.75;
-}
 
 function shade(d, dx, dy, R, labelR, holeR) {
   const S = R * 2;
 
   /*
-   * Fond : un dégradé chaud en diagonale, celui de la platine quand une pochette
-   * orangée l'éclaire. C'est lui qui rend la vignette reconnaissable de loin.
+   * Fond : un halo chaud, plus vif derrière le disque et qui s'éteint vers les
+   * angles. C'est ce qui donne du relief à une image aussi plate.
    */
-  const t = Math.min(1, Math.max(0, (dx + dy + S) / (S * 2)));
+  const halo = Math.max(0, 1 - d / (R * 1.9)) ** 1.6;
+  const diag = Math.min(1, Math.max(0, (dx + dy + S) / (S * 2)));
   const fond = [
-    Math.round(58 - 26 * t),
-    Math.round(30 - 14 * t),
-    Math.round(24 - 12 * t),
+    Math.round(30 + 62 * halo - 10 * diag),
+    Math.round(16 + 26 * halo - 6 * diag),
+    Math.round(13 + 16 * halo - 5 * diag),
     255,
   ];
 
-  // Le bras : une barre fine en diagonale, depuis le coin haut droit.
-  const bras = (() => {
-    const ux = 0.62;
-    const uy = -0.78;
-    const le = dx * ux + dy * uy;
-    const tr = dx * uy - dy * ux;
-    if (le < labelR * 0.95 || le > R * 1.34) return null;
-    const demi = le > R * 1.16 ? R * 0.1 : R * 0.045;
-    if (Math.abs(tr) > demi) return null;
-    const clair = 1 - Math.abs(tr) / demi;
-    const n = Math.round(150 + 70 * clair);
-    return [n, n + 4, n + 10, 255];
-  })();
+  if (d > R) return fond;
 
-  if (d > R) return bras ?? fond;
+  // Liseré clair sur la tranche : le disque cesse d'être un trou dans l'image.
+  if (d > R * 0.972) {
+    const t = (d - R * 0.972) / (R * 0.028);
+    const n = Math.round(96 - 60 * t);
+    return [n, n - 4, n - 6, 255];
+  }
 
-  if (d < holeR) return [26, 14, 11, 255];
+  if (d < holeR) return [26, 13, 10, 255];
 
   if (d < labelR) {
-    const ombre = d < holeR * 2.1 ? 16 : 0;
-    return bras ?? [247 - ombre, 244 - ombre, 237 - ombre, 255];
+    /*
+     * L'étiquette est LA forme reconnaissable. Orange franc, avec un dégradé
+     * léger pour qu'elle ne soit pas un autocollant, et un cerne sombre côté
+     * trou — c'est l'ombre du perçage sur un vrai disque.
+     */
+    const t = Math.min(1, d / labelR);
+    const cerne = d < holeR * 1.9 ? 26 : 0;
+    return [
+      Math.round(214 - 26 * t - cerne),
+      Math.round(92 - 22 * t - cerne),
+      Math.round(46 - 10 * t - cerne),
+      255,
+    ];
   }
 
   /*
-   * Le disque. Une base claire, la couleur coulée par-dessus à travers la
-   * marbrure, puis les sillons et un reflet — dans cet ordre, comme sur la
-   * platine elle-même.
+   * Le vinyle. Presque noir, avec des sillons à peine perceptibles et un
+   * balayage de lumière en diagonale — juste assez pour qu'on lise une matière
+   * brillante, pas assez pour brouiller la silhouette.
    */
-  const m = marbrure(dx, dy, R);
-  const melange = Math.min(1, Math.max(0, (m - 0.37) * 2.7));
-
-  const creme = [243, 238, 229];
-  const teinte = [183, 66, 33];
-  let c = [
-    creme[0] + (teinte[0] - creme[0]) * melange,
-    creme[1] + (teinte[1] - creme[1]) * melange,
-    creme[2] + (teinte[2] - creme[2]) * melange,
-  ];
-
-  // Sillons : une modulation fine, jamais assez forte pour brouiller la marbrure.
-  const sillon = (Math.sin(d * 2.3) * 0.5 + 0.5) * 7 - 3.5;
-  // Reflet venu du haut droit, comme la lumière de la scène.
+  const sillon = (Math.sin(d * 1.7) * 0.5 + 0.5) * 6;
   const angle = Math.atan2(dy, dx);
-  const reflet = Math.max(0, Math.cos(angle - 2.35)) ** 5 * 34;
-  // Assombrissement vers le bord : le disque s'arrondit au lieu d'être un aplat.
-  const bord = (d / R) ** 3 * 26;
-
-  c = c.map((v) => Math.round(Math.min(255, Math.max(0, v + sillon + reflet - bord))));
-  return bras ?? [c[0], c[1], c[2], 255];
+  const reflet = Math.max(0, Math.cos(angle - 2.3)) ** 4 * 30;
+  // Un second reflet, opposé et plus faible : une seule brillance fait plat.
+  const contre = Math.max(0, Math.cos(angle + 0.9)) ** 6 * 12;
+  const n = Math.round(16 + sillon + reflet + contre);
+  return [n, n + 1, n + 3, 255];
 }
 
 for (const size of [180, 256, 512]) {

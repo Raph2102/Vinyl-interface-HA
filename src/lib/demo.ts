@@ -19,6 +19,32 @@ const TRACKS = [
   { title: "Sillon 3", artist: "Léonie Ferrand", album: "Vagues courtes", duration: 187 },
 ];
 
+
+/**
+ * Pochettes réelles injectées pour les captures d'écran.
+ *
+ * Les illustrations de la démonstration sont générées : elles font l'affaire
+ * pour régler l'interface, mais elles donnent des captures qui sentent le
+ * gabarit. Un outil peut donc poser de vraies pochettes — celles de la
+ * bibliothèque Music Assistant de la personne — avant le chargement de la page,
+ * et la démonstration s'en sert à la place.
+ *
+ * Uniquement en mode démonstration, et uniquement lu : rien n'est envoyé nulle
+ * part, et l'application livrée ne fabrique jamais cette variable.
+ */
+export interface DemoAlbum {
+  name: string;
+  artist: string;
+  image: string;
+}
+
+export function injectedAlbums(): DemoAlbum[] | null {
+  if (!isDemo()) return null;
+  const posees = (window as unknown as { __MD_VINYL_ALBUMS__?: DemoAlbum[] })
+    .__MD_VINYL_ALBUMS__;
+  return Array.isArray(posees) && posees.length > 0 ? posees : null;
+}
+
 const FEATURES =
   Feature.PAUSE |
   Feature.SEEK |
@@ -155,19 +181,27 @@ export class DemoClient implements PlayerClient {
 
   private publish(): void {
     const track = TRACKS[this.index] ?? TRACKS[0]!;
+    // Une vraie pochette prend le pas sur le morceau fictif, titre compris :
+    // une capture où la pochette et le titre ne se répondent pas se remarque.
+    const vraies = injectedAlbums();
+    const vraie = vraies ? vraies[this.index % vraies.length] : null;
     this.onState({
       entity_id: this.entityId,
       state: this.playing ? "playing" : "paused",
       attributes: {
         friendly_name: demoSpeakerName(this.entityId),
         supported_features: FEATURES,
-        media_title: this.album ? `${this.album.name} · piste ${this.index + 1}` : track.title,
-        media_artist: this.album ? this.album.artist : track.artist,
-        media_album_name: this.album ? this.album.name : track.album,
+        media_title: vraie
+          ? vraie.name
+          : this.album
+            ? `${this.album.name} · piste ${this.index + 1}`
+            : track.title,
+        media_artist: vraie ? vraie.artist : this.album ? this.album.artist : track.artist,
+        media_album_name: vraie ? vraie.name : this.album ? this.album.name : track.album,
         media_duration: track.duration,
         media_position: this.position,
         media_position_updated_at: new Date().toISOString(),
-        entity_picture: this.cover ?? "./demo-cover.png",
+        entity_picture: this.cover ?? vraie?.image ?? "./demo-cover.png",
         volume_level: this.volume,
         is_volume_muted: false,
         shuffle: this.shuffle,
