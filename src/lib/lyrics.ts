@@ -85,18 +85,79 @@ async function searchLoose(track: TrackRef, signal?: AbortSignal): Promise<Lyric
   const res = await fetch(`${API}/search?${params}`, { signal });
   if (!res.ok) return null;
 
-  const list = (await res.json()) as (LrclibRecord & { duration: number })[];
+  const list = (await res.json()) as (LrclibRecord & {
+    duration: number;
+    artistName?: string;
+    trackName?: string;
+  })[];
   if (!Array.isArray(list) || list.length === 0) return null;
 
-  // On préfère un résultat synchronisé, et parmi eux celui dont la durée colle
-  // le mieux : c'est le meilleur indice qu'il s'agit du même enregistrement.
+  /*
+   * Le choix de la version décide du CALAGE, pas seulement du texte.
+   *
+   * Une recherche large rend des dizaines d'entrées portant le même titre :
+   * l'album, le remix, la version radio, un montage de soirée. Leurs paroles
+   * sont les mêmes, mais leurs horodatages appartiennent à des montages
+   * différents. Prendre la mauvaise, c'est afficher un texte juste au mauvais
+   * moment — ce qui est pire que ne rien afficher, parce qu'on croit à un défaut
+   * de l'app plutôt qu'à une erreur d'appariement.
+   *
+   * On note donc chaque candidat plutôt que de trier sur la seule durée : la
+   * durée d'abord, mais aussi la concordance du titre et de l'artiste, qu'une
+   * recherche large ne garantit pas.
+   */
   const target = track.duration ?? 0;
-  const best =
-    [...list]
-      .filter((r) => r.syncedLyrics)
-      .sort((a, b) => Math.abs(a.duration - target) - Math.abs(b.duration - target))[0] ?? list[0];
+  const normaliser = (v: string) =>
+    v
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
 
-  return best ? toLyrics(best) : null;
+  const titre = normaliser(track.title);
+  const artiste = normaliser(track.artist);
+
+  const note = (r: (typeof list)[number]) => {
+    // L'écart de durée, en secondes, est le signal principal. Au-delà de dix
+    // secondes, ce n'est plus le même montage.
+    const ecart = target > 0 ? Math.abs(r.duration - target) : 0;
+    let points = Math.min(ecart, 60);
+    if (target > 0 && ecart > 10) points += 40;
+    /*
+     * Un ARTISTE différent, c'est une autre chanson qui porte le même titre :
+     * la pénalité doit écraser n'importe quel avantage de durée. Un titre
+     * différent est plus souvent une variante — remix, live, version radio —
+     * qu'une erreur d'identité, donc on le sanctionne moins fort.
+     */
+    if (r.trackName && normaliser(r.trackName) !== titre) points += 25;
+    if (r.artistName && normaliser(r.artistName) !== artiste) points += 60;
+    return points;
+  };
+
+  const synchronises = list.filter((r) => r.syncedLyrics);
+  const best =
+    [...synchronises].sort((a, b) => note(a) - note(b))[0] ??
+    [...list].sort((a, b) => note(a) - note(b))[0];
+
+  if (!best) return null;
+
+  /*
+   * Aucune version dont la durée approche : les horodatages ne peuvent pas
+   * coller. On garde le texte, on jette la synchronisation — mieux vaut des
+   * paroles fixes et justes qu'un défilement faux.
+   */
+  const ecart = target > 0 ? Math.abs(best.duration - target) : 0;
+  if (target > 0 && ecart > 25) {
+    return {
+      lines: [],
+      synced: false,
+      plain: best.plainLyrics ?? (best.syncedLyrics ? stripTimestamps(best.syncedLyrics) : null),
+      instrumental: Boolean(best.instrumental),
+    };
+  }
+
+  return toLyrics(best);
 }
 
 function toLyrics(record: LrclibRecord): Lyrics {
@@ -156,4 +217,19 @@ export function lineAt(lines: LyricLine[], position: number): number {
     }
   }
   return found;
+}
+
+/**
+ * Retire les horodatages d'un texte LRC.
+ *
+ * Sert quand on a trouvé les bonnes paroles mais pour un autre montage : le
+ * texte reste juste, seuls les temps sont faux. On les enlève plutôt que de
+ * faire défiler à côté.
+ */
+function stripTimestamps(lrc: string): string {
+  return lrc
+    .split("\n")
+    .map((ligne) => ligne.replace(/\[\d+:\d+(?:[.:]\d+)?\]/g, "").trim())
+    .filter((ligne) => ligne.length > 0)
+    .join("\n");
 }

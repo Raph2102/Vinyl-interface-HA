@@ -137,15 +137,26 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
         setEntity(next);
       };
       embedded.connect([entityId]);
+
       /*
-       * Pas de close() ici : la connexion appartient à Home Assistant, pas à
-       * nous. On se contente de changer l'entité observée.
+       * L'heure du serveur est relevée AUSSI dans le panneau.
        *
-       * Pas de syncClock non plus : il lit l'heure du serveur dans un en-tête
-       * HTTP, ce qui suppose un jeton. Dans le panneau, la page et Home
-       * Assistant tournent sur la même machine pour le navigateur — l'écart
-       * d'horloge qu'on corrigeait n'existe pas.
+       * Je l'avais sautée en supposant qu'un panneau servi par Home Assistant
+       * ne pouvait pas être décalé par rapport à lui. C'est faux : l'horloge
+       * comparée est celle de l'APPAREIL qui affiche la page — une tablette
+       * murale peut dériver de plusieurs secondes. Or toute la position de
+       * lecture se calcule en comparant `media_position_updated_at` à l'heure
+       * locale : ce décalage se retrouve tel quel dans le bras et, surtout,
+       * dans le calage des paroles.
+       *
+       * On n'a besoin que de l'en-tête `Date` de la réponse — présent même sur
+       * un 401, donc aucun jeton n'est requis. La requête part sur notre propre
+       * origine, celle de Home Assistant.
        */
+      void syncClock({ haUrl: "", token: "" });
+
+      // Pas de close() : la connexion appartient à Home Assistant, pas à nous.
+      // On se contente de changer l'entité observée.
       return;
     }
 

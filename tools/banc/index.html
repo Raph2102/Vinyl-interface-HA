@@ -38,6 +38,20 @@
   }
 
   const params = new URLSearchParams(location.search);
+
+  /*
+   * Le morceau du banc peut etre impose par l adresse :
+   *   ?titre=Blinding+Lights&artiste=The+Weeknd&album=After+Hours&duree=200
+   * C est ce qui permet d essayer les paroles sur un vrai titre, sans dependre
+   * de ce qui joue chez quelqu un.
+   */
+  const titre = params.get("titre");
+  if (titre) {
+    const r = JSON.parse(localStorage.getItem("mdvinyl.settings.v1") ?? "{}");
+    r.lyrics = true;
+    r.entityId = "media_player.banc";
+    localStorage.setItem("mdvinyl.settings.v1", JSON.stringify(r));
+  }
   const HA = params.get("ha");
   const TOKEN = params.get("token");
   const panneau = document.getElementById("p");
@@ -52,10 +66,10 @@
           attributes: {
             friendly_name: "Banc d'essai",
             supported_features: 84479,
-            media_title: "Morceau de banc",
-            media_artist: "Essai",
-            media_album_name: "Album d'essai",
-            media_duration: 240,
+            media_title: titre ?? "Morceau de banc",
+            media_artist: params.get("artiste") ?? "Essai",
+            media_album_name: params.get("album") ?? "Album d'essai",
+            media_duration: Number(params.get("duree") ?? 240),
             media_position: 30,
             media_position_updated_at: new Date().toISOString(),
             volume_level: 0.4,
