@@ -12809,7 +12809,7 @@ function M1({ embedded: f } = {}) {
     const Z = setInterval(async () => {
       try {
         const yt = await (await fetch(`./version.json?_=${Date.now()}`, { cache: "no-store" })).json();
-        yt.build && yt.build !== "1786574686089" && window.location.reload();
+        yt.build && yt.build !== "1786577974620" && window.location.reload();
       } catch {
       }
     }, 9e5);
