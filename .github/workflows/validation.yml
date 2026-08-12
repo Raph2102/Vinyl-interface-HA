@@ -28,4 +28,16 @@ jobs:
       - uses: actions/checkout@v4
       # Le validateur de Home Assistant lui-même : il relit le manifeste comme
       # le ferait le cœur, ce qui attrape les erreurs avant l'utilisateur.
+      # Ce que le conteneur hassfest cherche, exactement comme son script le fait.
+      # Sans cette trace, on debogue a l aveugle un plantage qui survient dans son
+      # code et non dans le notre.
+      - name: Ce que hassfest va trouver
+        run: |
+          echo "— manifestes decouverts —"
+          find custom_components -mindepth 2 -maxdepth 2 -name manifest.json
+          find . -maxdepth 1 -name manifest.json
+          echo "— contenu —"
+          for m in $(find custom_components -mindepth 2 -maxdepth 2 -name manifest.json; find . -maxdepth 1 -name manifest.json); do
+            echo "### $m"; cat "$m"; echo;
+          done
       - uses: home-assistant/actions/hassfest@master
