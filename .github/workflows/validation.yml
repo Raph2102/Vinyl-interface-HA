@@ -1,0 +1,31 @@
+# Les deux contrôles que HACS demande avant d'accepter un dépôt dans sa liste
+# par défaut. Ils tournent à chaque envoi, et une fois par jour : une règle peut
+# changer côté HACS ou Home Assistant sans qu'on y touche.
+name: Validation
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+jobs:
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Contrôle HACS
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    name: hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Le validateur de Home Assistant lui-même : il relit le manifeste comme
+      # le ferait le cœur, ce qui attrape les erreurs avant l'utilisateur.
+      - uses: home-assistant/actions/hassfest@master
