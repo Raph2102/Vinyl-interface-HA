@@ -31,34 +31,63 @@ import { loadSettings, saveSettings } from "./lib/settings";
 import styles from "./styles.css?inline";
 
 /**
- * Demande à Home Assistant de replier complètement sa barre latérale.
+ * Ce que le panneau emprunte au reste de Home Assistant, et qu'il rend en
+ * partant.
  *
- * Le frontend écoute `hass-dock-sidebar` sur son élément racine. Trois modes :
- * « docked » (ancrée), « auto » (réduite à un rail d'icônes) et
- * « always_hidden » (rien du tout, ouverte au glissement depuis le bord gauche).
+ * PREMIÈRE VERSION, ET SON DÉFAUT — je passais par l'événement
+ * `hass-dock-sidebar`. Il fait bien disparaître la barre, mais il ENREGISTRE la
+ * préférence de l'utilisateur, pour toute son interface et durablement. Modifier
+ * un réglage global pour obtenir un effet passager était une mauvaise idée
+ * indépendamment du bogue : le jour où la restauration ne s'est pas faite, la
+ * barre est restée cachée partout, sur tous les tableaux de bord.
  *
- * On émet depuis l'élément `home-assistant` plutôt que depuis nous-mêmes : au
- * moment où l'on rend la main, le panneau est déjà détaché du document, et un
- * événement lancé depuis un nœud détaché ne remonte à personne.
+ * Ce qui suit ne touche à aucun réglage. On écrit des styles en ligne sur le
+ * document, on note leur valeur d'avant, et on les remet exactement comme ils
+ * étaient. Rien n'est persisté : au pire, un rechargement de page efface tout.
  */
-function ancrageBarreLaterale(mode: string): void {
-  const racine = document.querySelector("home-assistant");
-  if (!racine) return;
-  racine.dispatchEvent(
-    new CustomEvent("hass-dock-sidebar", {
-      detail: { dock: mode },
-      bubbles: true,
-      composed: true,
-    }),
-  );
+class Emprise {
+  private rendus: (() => void)[] = [];
+
+  /** Pose une propriété CSS sur un élément et retient de quoi la défaire. */
+  poser(cible: HTMLElement, propriete: string, valeur: string): void {
+    const avant = cible.style.getPropertyValue(propriete);
+    const prioriteAvant = cible.style.getPropertyPriority(propriete);
+    cible.style.setProperty(propriete, valeur, "important");
+    this.rendus.push(() => {
+      if (avant) cible.style.setProperty(propriete, avant, prioriteAvant);
+      else cible.style.removeProperty(propriete);
+    });
+  }
+
+  /** Enregistre une restitution qui n'est pas un style : un écouteur, par exemple. */
+  aussi(defaire: () => void): void {
+    this.rendus.push(defaire);
+  }
+
+  rendre(): void {
+    for (const defaire of this.rendus.splice(0).reverse()) {
+      try {
+        defaire();
+      } catch {
+        /* l'élément a pu disparaître entre-temps : rien de vital */
+      }
+    }
+  }
+}
+
+/** L'élément racine du frontend de Home Assistant, s'il est là. */
+function racineHa(): HTMLElement | null {
+  return document.querySelector("home-assistant");
 }
 
 class MdVinylPanel extends HTMLElement {
   private root: Root | null = null;
   private client: HassClient | null = null;
   private mounted = false;
-  /** Ancrage de barre latérale trouvé en arrivant, rendu en repartant. */
-  private ancrageInitial: string | null = null;
+  /** Tout ce qu on a modifié hors de notre arbre, et de quoi le défaire. */
+  private emprise = new Emprise();
+  /** Séparée : la barre latérale peut être rendue avant qu on parte. */
+  private barre = new Emprise();
 
   /** Home Assistant écrit ici, souvent. */
   set hass(hass: HassLike) {
@@ -67,7 +96,7 @@ class MdVinylPanel extends HTMLElement {
     if (!this.client) {
       this.client = new HassClient(hass);
       this.premierChoixDEnceinte(hass);
-      this.effacerLaBarreLaterale(hass);
+      this.prendreLaPlace();
       this.monter();
     } else {
       this.client.update(hass);
@@ -87,20 +116,90 @@ class MdVinylPanel extends HTMLElement {
   }
 
   /**
-   * La platine prend tout l'écran.
+   * La platine prend toute la place, le temps de la visite.
    *
-   * Même repliée, la barre latérale de Home Assistant laisse un rail d'icônes
-   * qui mord sur la largeur — et sur une tablette, cela suffit à rogner la
-   * scène et à décaler le disque. On demande donc l'effacement complet le temps
-   * de la visite, et on rend le réglage d'origine en repartant : personne ne
-   * doit retrouver son interface changée pour être passé écouter un disque.
+   * Deux emprunts au document, tous deux réversibles et invisibles ailleurs :
    *
-   * La barre reste accessible d'un glissement depuis le bord gauche.
+   * 1. LA LARGEUR DU TIROIR. Même repliée, la barre latérale laisse un rail
+   *    d'icônes qui mord sur la scène. On met sa largeur à zéro par les
+   *    variables que Home Assistant expose — une propriété personnalisée
+   *    traverse les frontières d'ombre, ce qui permet de l'atteindre sans aller
+   *    fouiller dans ses composants. La barre revient d'un glissement depuis le
+   *    bord gauche, et la préférence de l'utilisateur n'est pas touchée : sur
+   *    les autres pages, tout est comme avant.
+   *
+   * 2. LE REBOND DU DOCUMENT. C'est lui qui déclenche le tirage-pour-rafraîchir.
+   *    Le blocage posé dans notre arbre ne suffisait pas : le geste commence
+   *    chez nous, mais la chaîne de défilement remonte jusqu'au document de Home
+   *    Assistant, et c'est tout en haut que le navigateur décide de rafraîchir.
+   *    Il faut donc le dire là aussi.
    */
-  private effacerLaBarreLaterale(hass: HassLike): void {
-    this.ancrageInitial = hass.dockedSidebar ?? null;
-    if (this.ancrageInitial === "always_hidden") return;
-    ancrageBarreLaterale("always_hidden");
+  private prendreLaPlace(): void {
+    const racine = racineHa();
+    if (racine) {
+      this.barre.poser(racine, "--mdc-drawer-width", "0px");
+      this.barre.poser(racine, "--app-drawer-width", "0px");
+    }
+    for (const cible of [document.documentElement, document.body]) {
+      this.emprise.poser(cible, "overscroll-behavior", "none");
+      this.emprise.poser(cible, "overscroll-behavior-y", "none");
+    }
+    this.ecouterLeBordGauche();
+  }
+
+  /**
+   * Ramener la barre latérale d'un glissement depuis le bord gauche.
+   *
+   * Effacer la barre sans laisser de moyen de la rappeler serait un piège : sur
+   * une tablette, le panneau n'a pas de barre d'outils, donc plus rien pour
+   * revenir en arrière. On rend donc le geste que l'on attend à cet endroit —
+   * partir du bord et tirer vers la droite, là même où la barre se trouvait.
+   *
+   * Une fois rappelée, elle reste : on ne joue pas à la faire disparaître sous
+   * le doigt. Elle se remasque à la prochaine visite du panneau.
+   */
+  private ecouterLeBordGauche(): void {
+    /** Largeur de la zone d'amorce, en pixels. Assez large pour un pouce. */
+    const BORD = 28;
+    /** Course horizontale à franchir pour que ce soit un geste, pas un frôlement. */
+    const COURSE = 45;
+
+    let depart: { x: number; y: number } | null = null;
+
+    const debut = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t) return;
+      depart = t.clientX <= BORD ? { x: t.clientX, y: t.clientY } : null;
+    };
+
+    const bouge = (e: TouchEvent) => {
+      if (!depart) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - depart.x;
+      const dy = Math.abs(t.clientY - depart.y);
+      // Franchement horizontal, franchement vers la droite.
+      if (dx > COURSE && dx > dy * 1.5) {
+        depart = null;
+        this.barre.rendre();
+      }
+    };
+
+    const fin = () => {
+      depart = null;
+    };
+
+    this.addEventListener("touchstart", debut, { passive: true });
+    this.addEventListener("touchmove", bouge, { passive: true });
+    this.addEventListener("touchend", fin, { passive: true });
+    this.addEventListener("touchcancel", fin, { passive: true });
+
+    this.emprise.aussi(() => {
+      this.removeEventListener("touchstart", debut);
+      this.removeEventListener("touchmove", bouge);
+      this.removeEventListener("touchend", fin);
+      this.removeEventListener("touchcancel", fin);
+    });
   }
 
   private monter(): void {
@@ -159,16 +258,14 @@ class MdVinylPanel extends HTMLElement {
 
   disconnectedCallback(): void {
     /*
-     * On rend la barre latérale telle qu'on l'a trouvée.
+     * On rend tout ce qu'on avait emprunté au document.
      *
      * Personne ne doit retrouver son interface changée pour être passé écouter
-     * un disque : si elle était ancrée en arrivant, elle l'est de nouveau en
-     * repartant.
+     * un disque. Et comme rien n'a été enregistré, même un échec ici se répare
+     * d'un simple rechargement de page.
      */
-    if (this.ancrageInitial && this.ancrageInitial !== "always_hidden") {
-      ancrageBarreLaterale(this.ancrageInitial);
-    }
-    this.ancrageInitial = null;
+    this.barre.rendre();
+    this.emprise.rendre();
 
     // Home Assistant détache le panneau quand on change d'onglet. On rend la
     // main proprement plutôt que de laisser une boucle d'animation tourner.
