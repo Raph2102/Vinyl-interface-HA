@@ -151,9 +151,28 @@ export function Library({
   /** Taille d'une pochette et rayon de la roue, en pixels. Mesurés, pas devinés. */
   const geo = useRef({ cover: 0, radius: 0 });
 
+  /*
+   * La taille des pochettes se calcule sur LA PLACE RÉELLEMENT DISPONIBLE.
+   *
+   * Elle venait d'unités de fenêtre — 84vh, 46vw — ce qui suppose que l'app
+   * occupe tout l'écran. Dans le panneau de Home Assistant, c'est faux : il
+   * reste la barre latérale et l'en-tête. Les pochettes dépassaient donc du
+   * cadre et paraissaient beaucoup trop grosses, surtout sur une tablette.
+   *
+   * On mesure la boîte du bac lui-même et on s'y ajuste. Deux contraintes : la
+   * pochette doit tenir en hauteur en laissant respirer, et rester assez étroite
+   * pour qu'on voie ses voisines de part et d'autre — sans quoi on ne sait plus
+   * qu'on est dans un bac.
+   */
   const measure = useCallback(() => {
-    const item = crateRef.current?.querySelector<HTMLElement>(".crate__item");
-    const cover = item?.offsetWidth ?? 0;
+    const crate = crateRef.current;
+    if (!crate) return;
+
+    const boite = crate.getBoundingClientRect();
+    if (boite.width === 0 || boite.height === 0) return;
+
+    const cover = Math.round(Math.min(boite.height * 0.66, boite.width * 0.36));
+    crate.style.setProperty("--cover", cover + "px");
     geo.current = { cover, radius: cover * RADIUS };
   }, []);
 

@@ -84,7 +84,15 @@ export const DEFAULTS: Settings = {
   haUrl: typeof __DEV_URL__ === "string" ? __DEV_URL__ : "",
   token: typeof __DEV_TOKEN__ === "string" ? __DEV_TOKEN__ : "",
   entityId: typeof __DEV_ENTITY__ === "string" ? __DEV_ENTITY__ : "",
-  vinyl: "tinted",
+  /*
+   * Réglages d'origine choisis pour que la platine soit à son avantage dès la
+   * première ouverture, sans rien toucher : disque marbré prenant la couleur de
+   * la pochette en cours, fond adaptatif, écran de repos après deux minutes.
+   *
+   * vinylTint vide ne veut pas dire « pas de couleur » : cela veut dire « suivre
+   * la pochette ». Le disque change donc de teinte avec l'album.
+   */
+  vinyl: "marble",
   background: "adaptive",
   playControl: "arm",
   counterRotateLabel: false,
@@ -92,7 +100,7 @@ export const DEFAULTS: Settings = {
   vinylTint: "",
   labelText: "",
   lyrics: true,
-  idleMinutes: 5,
+  idleMinutes: 2,
   onPlay: { ...NO_TRIGGER },
   onStop: { ...NO_TRIGGER },
 };

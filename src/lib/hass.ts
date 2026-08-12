@@ -37,6 +37,8 @@ export interface HassLike {
   callWS<T = unknown>(message: Record<string, unknown>): Promise<T>;
   language?: string;
   user?: { is_admin?: boolean; name?: string };
+  /** Ancrage de la barre latérale : « docked », « auto » ou « always_hidden ». */
+  dockedSidebar?: string;
 }
 
 export class HassClient implements PlayerClient {

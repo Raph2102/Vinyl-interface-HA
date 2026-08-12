@@ -2337,3 +2337,38 @@ button {
   border: none;
   border-radius: 6px;
 }
+
+/* =========================================================================
+   Gestes : ce que le navigateur n'a pas le droit de faire
+   ========================================================================= */
+
+/*
+ * Toute l'app refuse les gestes du navigateur, et les rend un par un là où une
+ * liste doit défiler.
+ *
+ * Ces protections vivaient sur `body` — ce qui suffisait pour la page autonome,
+ * et ne servait à rien dans le panneau : nos styles y sont enfermés dans un
+ * shadow DOM, et `body` appartient à Home Assistant. Résultat, un glissement
+ * horizontal un peu oblique sur une tablette était interprété comme un tirage
+ * vers le bas, et rafraîchissait la page en plein geste.
+ *
+ * `touch-action: none` se lit sur l'élément touché ET ses ancêtres : le poser à
+ * la racine couvre donc tout ce qui n'a pas explicitement demandé autre chose.
+ */
+:host,
+.app {
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Les seuls endroits qui défilent vraiment. `pan-y` autorise le doigt à
+   remonter la liste, et rien d'autre — surtout pas le tirage de rafraîchissement. */
+.sidepanel__list,
+.setup,
+.lyrics {
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+}

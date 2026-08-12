@@ -30,10 +30,35 @@ import { loadSettings, saveSettings } from "./lib/settings";
 // Vite remplace cet import par le texte de la feuille de style.
 import styles from "./styles.css?inline";
 
+/**
+ * Demande à Home Assistant de replier complètement sa barre latérale.
+ *
+ * Le frontend écoute `hass-dock-sidebar` sur son élément racine. Trois modes :
+ * « docked » (ancrée), « auto » (réduite à un rail d'icônes) et
+ * « always_hidden » (rien du tout, ouverte au glissement depuis le bord gauche).
+ *
+ * On émet depuis l'élément `home-assistant` plutôt que depuis nous-mêmes : au
+ * moment où l'on rend la main, le panneau est déjà détaché du document, et un
+ * événement lancé depuis un nœud détaché ne remonte à personne.
+ */
+function ancrageBarreLaterale(mode: string): void {
+  const racine = document.querySelector("home-assistant");
+  if (!racine) return;
+  racine.dispatchEvent(
+    new CustomEvent("hass-dock-sidebar", {
+      detail: { dock: mode },
+      bubbles: true,
+      composed: true,
+    }),
+  );
+}
+
 class MdVinylPanel extends HTMLElement {
   private root: Root | null = null;
   private client: HassClient | null = null;
   private mounted = false;
+  /** Ancrage de barre latérale trouvé en arrivant, rendu en repartant. */
+  private ancrageInitial: string | null = null;
 
   /** Home Assistant écrit ici, souvent. */
   set hass(hass: HassLike) {
@@ -42,6 +67,7 @@ class MdVinylPanel extends HTMLElement {
     if (!this.client) {
       this.client = new HassClient(hass);
       this.premierChoixDEnceinte(hass);
+      this.effacerLaBarreLaterale(hass);
       this.monter();
     } else {
       this.client.update(hass);
@@ -58,6 +84,23 @@ class MdVinylPanel extends HTMLElement {
     if (reglages.entityId) return;
     const choix = defaultPlayer(hass);
     if (choix) saveSettings({ ...reglages, entityId: choix });
+  }
+
+  /**
+   * La platine prend tout l'écran.
+   *
+   * Même repliée, la barre latérale de Home Assistant laisse un rail d'icônes
+   * qui mord sur la largeur — et sur une tablette, cela suffit à rogner la
+   * scène et à décaler le disque. On demande donc l'effacement complet le temps
+   * de la visite, et on rend le réglage d'origine en repartant : personne ne
+   * doit retrouver son interface changée pour être passé écouter un disque.
+   *
+   * La barre reste accessible d'un glissement depuis le bord gauche.
+   */
+  private effacerLaBarreLaterale(hass: HassLike): void {
+    this.ancrageInitial = hass.dockedSidebar ?? null;
+    if (this.ancrageInitial === "always_hidden") return;
+    ancrageBarreLaterale("always_hidden");
   }
 
   private monter(): void {
@@ -100,9 +143,11 @@ class MdVinylPanel extends HTMLElement {
      * hauteur explicite, l'app se replie sur le contenu et la platine se
      * retrouve écrasée en haut de l'écran.
      */
-    hote.style.cssText = "position:absolute; inset:0; overflow:hidden;";
+    hote.style.cssText =
+      "position:absolute; inset:0; overflow:hidden; overscroll-behavior:none; touch-action:none;";
     shadow.appendChild(hote);
-    this.style.cssText = "display:block; position:relative; width:100%; height:100%;";
+    this.style.cssText =
+      "display:block; position:relative; width:100%; height:100%; overscroll-behavior:none;";
 
     this.root = createRoot(hote);
     this.root.render(
@@ -113,6 +158,18 @@ class MdVinylPanel extends HTMLElement {
   }
 
   disconnectedCallback(): void {
+    /*
+     * On rend la barre latérale telle qu'on l'a trouvée.
+     *
+     * Personne ne doit retrouver son interface changée pour être passé écouter
+     * un disque : si elle était ancrée en arrivant, elle l'est de nouveau en
+     * repartant.
+     */
+    if (this.ancrageInitial && this.ancrageInitial !== "always_hidden") {
+      ancrageBarreLaterale(this.ancrageInitial);
+    }
+    this.ancrageInitial = null;
+
     // Home Assistant détache le panneau quand on change d'onglet. On rend la
     // main proprement plutôt que de laisser une boucle d'animation tourner.
     this.root?.unmount();

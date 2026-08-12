@@ -1,7 +1,7 @@
 {
   "domain": "md_vinyl",
   "name": "MD Vinyl",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "documentation": "https://github.com/Raph2102/Vinyl-interface-HA",
   "issue_tracker": "https://github.com/Raph2102/Vinyl-interface-HA/issues",
   "codeowners": [
