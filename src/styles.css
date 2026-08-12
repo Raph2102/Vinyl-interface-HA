@@ -2394,7 +2394,15 @@ button {
  * et n'a personne à côté d'elle.
  */
 :host {
-  --ha-rail: 56px;
+  /*
+   * Largeur reservee au rail de Home Assistant.
+   *
+   * Mesuree a l usage plutot que deduite : le rail annonce 56 px, mais entre sa
+   * bordure et l espace que le frontend garde autour, il en prend un peu plus.
+   * Huit pixels suffisent a ce que le bouton de la bibliotheque et le titre du
+   * bas cessent d etre mordus.
+   */
+  --ha-rail: 64px;
 }
 
 :host .app {
