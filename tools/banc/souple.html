@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>banc du panneau — dans un cadre décalé</title>
+<style>
+  /*
+   * Reproduit la situation de Home Assistant : le panneau ne reçoit pas toute
+   * la fenêtre, mais une boîte décalée par un rail à gauche et une barre en
+   * haut. C'est là que se voit la différence entre `position: fixed` — ancrée à
+   * la fenêtre, donc passant SOUS le rail — et `position: absolute`, qui
+   * remplit la boîte donnée.
+   */
+  html,
+  body {
+    margin: 0;
+    height: 100%;
+    background: #111;
+    font-family: system-ui, sans-serif;
+    color: #9aa;
+  }
+  #rail {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 64px;
+    background: repeating-linear-gradient(180deg, #1d2733 0 40px, #16202b 40px 80px);
+    border-right: 1px solid #2a3644;
+    z-index: 9;
+    display: grid;
+    align-content: start;
+    justify-items: center;
+    padding-top: 12px;
+    gap: 22px;
+    font-size: 11px;
+  }
+  #barre {
+    position: fixed;
+    left: 65px;
+    right: 0;
+    top: 0;
+    height: 56px;
+    background: #16202b;
+    border-bottom: 1px solid #2a3644;
+    z-index: 9;
+    display: flex;
+    align-items: center;
+    padding-left: 16px;
+    font-size: 13px;
+  }
+  #cadre {
+    margin-left: 65px;
+    margin-top: 57px;
+  }
+  md-vinyl-panel {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+</style>
+
+<div id="rail"><span>≡</span><span>◈</span><span>♪</span><span>⚙</span></div>
+<div id="barre">Home Assistant — cadre SANS hauteur définie</div>
+<div id="cadre"><md-vinyl-panel id="p"></md-vinyl-panel></div>
+
+<script type="module">
+  await import("/md-vinyl-panel.js?v=" + Date.now());
+
+  document.getElementById("p").hass = {
+    states: {
+      "media_player.banc": {
+        entity_id: "media_player.banc",
+        state: "playing",
+        attributes: {
+          friendly_name: "Banc d'essai",
+          supported_features: 84479,
+          media_title: "Morceau de banc",
+          media_artist: "Essai",
+          media_album_name: "Album d'essai",
+          media_duration: 240,
+          media_position: 30,
+          media_position_updated_at: new Date().toISOString(),
+          volume_level: 0.4,
+          mass_player_type: "player",
+        },
+      },
+    },
+    callService: async () => null,
+    callWS: async () => [],
+    user: { is_admin: true },
+  };
+</script>

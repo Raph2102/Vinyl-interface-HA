@@ -130,6 +130,67 @@ class MdVinylPanel extends HTMLElement {
     }
   }
 
+  /**
+   * Cale la platine sur la boîte que Home Assistant nous donne, en la MESURANT.
+   *
+   * Trois tentatives ont échoué avant celle-ci, et chacune pour une raison
+   * différente :
+   *
+   *  - `position: fixed` s'ancre à la fenêtre du navigateur, donc passe sous le
+   *    rail de la barre latérale et sous la barre du haut ;
+   *  - une réserve en pixels compense ce décalage, mais il faut la redeviner sur
+   *    chaque appareil, et elle ne suit pas l'état de la barre ;
+   *  - `position: absolute` remplirait la bonne boîte… si l'hôte avait une
+   *    hauteur. Or `height: 100%` ne vaut rien tant que le parent n'a pas de
+   *    hauteur définie : la boîte s'effondre à zéro, et l'écran devient noir.
+   *
+   * On mesure donc l'hôte et on écrit ses coordonnées réelles. `fixed` garantit
+   * qu'on occupe toujours quelque chose de visible ; les coordonnées mesurées
+   * garantissent qu'on occupe exactement la bonne zone. Et si la mesure ne donne
+   * rien — hôte pas encore disposé — on retombe sur l'écran entier : mal placé
+   * vaut mieux qu'invisible.
+   */
+  private suivreLaBoite(hote: HTMLElement): void {
+    const caler = () => {
+      const r = this.getBoundingClientRect();
+
+      /*
+       * Un hôte sans hauteur garde une POSITION et une LARGEUR. Quand la
+       * mesure manque, on complète donc avec ce qui reste de la fenêtre à
+       * partir de notre coin — plutôt que de repartir de l'écran entier, ce qui
+       * nous ferait repasser sous le rail.
+       */
+      const largeur = r.width > 0 ? r.width : window.innerWidth - r.left;
+      const hauteur = r.height > 0 ? r.height : window.innerHeight - r.top;
+
+      hote.style.position = "fixed";
+      if (largeur > 0 && hauteur > 0) {
+        hote.style.inset = "";
+        hote.style.left = `${r.left}px`;
+        hote.style.top = `${r.top}px`;
+        hote.style.width = `${largeur}px`;
+        hote.style.height = `${hauteur}px`;
+      } else {
+        // Dernier recours : l'écran entier. Mal placé vaut mieux qu'invisible.
+        hote.style.inset = "0";
+        hote.style.width = "";
+        hote.style.height = "";
+      }
+    };
+
+    caler();
+
+    const observateur = new ResizeObserver(caler);
+    observateur.observe(this);
+    // La barre latérale s'ouvre et se ferme sans changer notre taille : on
+    // regarde donc aussi la fenêtre, qui bouge dans ce cas.
+    window.addEventListener("resize", caler);
+    this.emprise.aussi(() => {
+      observateur.disconnect();
+      window.removeEventListener("resize", caler);
+    });
+  }
+
   private monter(): void {
     if (this.mounted || !this.client) return;
     this.mounted = true;
@@ -165,17 +226,12 @@ class MdVinylPanel extends HTMLElement {
     shadow.appendChild(feuille);
 
     const hote = document.createElement("div");
-    /*
-     * Le panneau occupe toute la zone que Home Assistant lui laisse. Sans cette
-     * hauteur explicite, l'app se replie sur le contenu et la platine se
-     * retrouve écrasée en haut de l'écran.
-     */
-    hote.style.cssText =
-      "position:absolute; inset:0; overflow:hidden; overscroll-behavior:none; touch-action:none;";
+    hote.style.cssText = "overflow:hidden; overscroll-behavior:none; touch-action:none;";
     shadow.appendChild(hote);
     this.style.cssText =
       "display:block; position:relative; width:100%; height:100%; overscroll-behavior:none;";
 
+    this.suivreLaBoite(hote);
     this.root = createRoot(hote);
     this.root.render(
       <StrictMode>
