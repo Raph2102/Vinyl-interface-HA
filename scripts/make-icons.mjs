@@ -131,9 +131,21 @@ function shade(d, dx, dy, R, labelR, holeR) {
   return [level, level + 1, level + 3, 255];
 }
 
-for (const size of [180, 512]) {
+for (const size of [180, 256, 512]) {
   const png = encodePng(size, size, render(size));
   writeFileSync(join(PUBLIC, `icon-${size}.png`), png);
+
+  /*
+   * Les memes images servent de marque a Home Assistant.
+   *
+   * HACS exige que l integration ait une icone : soit dans le depot central des
+   * marques, soit — ce qui est bien plus simple — livree avec elle. Il attend
+   * icon.png en 256 px et icon@2x.png en 512.
+   */
+  const marque = join(ROOT, "custom_components", "md_vinyl", "brand");
+  mkdirSync(marque, { recursive: true });
+  if (size === 256) writeFileSync(join(marque, "icon.png"), png);
+  if (size === 512) writeFileSync(join(marque, "icon@2x.png"), png);
   console.log(`public/icon-${size}.png  (${(png.length / 1024).toFixed(1)} Ko)`);
 }
 
