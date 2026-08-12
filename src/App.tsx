@@ -721,15 +721,31 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     const dy = target.top + target.height / 2 - (top + size / 2);
 
     const flyer = document.createElement("div");
+    /*
+     * La copie volante vit DANS notre racine, pas dans le document.
+     *
+     * Elle était ajoutée à `document.body`. Dans la page autonome c'est le même
+     * document, donc elle héritait de nos styles. Dans le panneau, `document.body`
+     * appartient à Home Assistant : la copie atterrissait hors de notre arbre
+     * d'ombre, sans une seule de nos règles — donc sans ombre, sans plan, sans
+     * rien. L'animation partait dans le vide.
+     *
+     * En la posant dans notre racine, les positions doivent être relatives à
+     * elle : les rectangles mesurés sont en coordonnées de fenêtre, on en
+     * retranche donc l'origine de la racine.
+     */
+    const racine = rootRef.current ?? document.body;
+    const cadre = racine.getBoundingClientRect();
+
     flyer.className = "flyer";
     // Rotation autour du centre, comme sur la roue.
     flyer.style.transformOrigin = "50% 50%";
-    flyer.style.left = `${left}px`;
-    flyer.style.top = `${top}px`;
+    flyer.style.left = `${left - cadre.left}px`;
+    flyer.style.top = `${top - cadre.top}px`;
     flyer.style.width = `${size}px`;
     flyer.style.height = `${size}px`;
     if (album.image) flyer.style.backgroundImage = `url("${album.image}")`;
-    document.body.appendChild(flyer);
+    racine.appendChild(flyer);
 
     /*
      * Le disque et le bras s'effacent AVANT que la pochette n'arrive.

@@ -25,8 +25,8 @@ const TYPES = { ".html": "text/html", ".js": "text/javascript", ".png": "image/p
 createServer((req, res) => {
   const chemin = (req.url ?? "/").split("?")[0];
   const fichier =
-    chemin === "/" || chemin === "/index.html"
-      ? join(ICI, "index.html")
+    chemin === "/" || chemin === "/index.html" || chemin === "/cadre"
+      ? join(ICI, chemin === "/cadre" ? "cadre.html" : "index.html")
       : join(ROOT, "custom_components", "md_vinyl", "frontend", chemin.replace(/^\//, ""));
 
   try {

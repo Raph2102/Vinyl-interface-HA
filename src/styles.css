@@ -1660,8 +1660,9 @@ button {
  * objet sort du bac, se retourne et va se poser sur la platine. C'est une copie
  * volante, posée en position fixe, animée d'un rectangle à l'autre.
  */
-.flyer {
-  position: fixed;
+.flyer {
+  /* Positionnée dans notre racine, pas dans la fenêtre : voir playAlbum. */
+  position: absolute;
   z-index: 40;
   pointer-events: none;
   background-size: cover;
@@ -2378,43 +2379,26 @@ button {
    ========================================================================= */
 
 /*
- * Le rail de la barre latérale mord sur notre bord gauche.
+ * Dans le panneau, la platine remplit LA BOÎTE QUE HOME ASSISTANT LUI DONNE.
  *
- * J'ai d'abord cherché à faire disparaître la barre : par l'événement de
- * Home Assistant, qui enregistre une préférence globale et l'a laissée cachée
- * partout ; puis par la largeur du tiroir, sans effet. Une barre qu'on masque
- * doit pouvoir se rouvrir d'un geste, et rien ne le garantit depuis un panneau.
+ * C'était toute l'affaire du contenu rogné par la barre latérale, et ce n'était
+ * pas une question de pixels à ajuster.
  *
- * On fait donc l'inverse, et c'est plus honnête : on ne touche à rien chez
- * l'hôte, on décale notre propre contenu. Le texte du haut et le bouton de la
- * bibliothèque cessent d'être coupés, et la scène reste centrée sur ce qui
- * reste.
+ * La racine de l'app est en `position: fixed`. C'est juste pour la page
+ * autonome — elle EST la page — et faux ici : une boîte fixe s'ancre à la
+ * FENÊTRE DU NAVIGATEUR, et ignore donc l'espace que le frontend a déjà réservé
+ * pour son rail et sa barre du haut. La platine passait dessous, et je
+ * compensais avec une réserve en pixels qu'il fallait redeviner sur chaque
+ * appareil.
  *
- * La réserve ne s'applique qu'au panneau : la page autonome occupe tout l'écran
- * et n'a personne à côté d'elle.
+ * Si Music Assistant et les autres panneaux tombent toujours juste, c'est
+ * précisément parce qu'ils ne se placent pas : ils se contentent de remplir ce
+ * qu'on leur donne. En repassant en `absolute`, on fait pareil — plus aucune
+ * largeur à deviner, et cela suit tout seul l'état de la barre, ancrée, repliée
+ * ou masquée.
  */
-:host {
-  /*
-   * Largeur reservee au rail de Home Assistant.
-   *
-   * Mesuree a l usage plutot que deduite : le rail annonce 56 px, mais entre sa
-   * bordure et l espace que le frontend garde autour, il en prend un peu plus.
-   * Huit pixels suffisent a ce que le bouton de la bibliotheque et le titre du
-   * bas cessent d etre mordus.
-   */
-  --ha-rail: 64px;
-}
-
 :host .app {
-  padding-left: max(env(safe-area-inset-left), var(--ha-rail));
-}
-
-/* Écran étroit : Home Assistant replie entièrement sa barre, plus rien à
-   réserver. */
-@media (max-width: 870px) {
-  :host {
-    --ha-rail: 0px;
-  }
+  position: absolute;
 }
 
 /* =========================================================================
