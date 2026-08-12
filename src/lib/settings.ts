@@ -59,6 +59,15 @@ export interface Settings {
    */
   vinylTint: string;
   /**
+   * Grossissement des pochettes dans le bac, autour de la taille calculée.
+   *
+   * La taille de base s adapte deja a la place disponible, mais ce qui est
+   * juste sur un ecran de bureau paraît petit sur une tablette tenue a bout de
+   * bras. Ce facteur reste donc RELATIF a la mesure automatique : on garde
+   * l adaptation, on regle seulement le gout. 1 = taille calculee.
+   */
+  libraryZoom: number;
+  /**
    * Ce qui est gravé sur l'étiquette centrale, à la place du titre.
    * Vide = le morceau en cours, comme aujourd'hui.
    */
@@ -99,6 +108,7 @@ export const DEFAULTS: Settings = {
   rpm: 33.3333,
   vinylTint: "",
   labelText: "",
+  libraryZoom: 1,
   lyrics: true,
   idleMinutes: 2,
   onPlay: { ...NO_TRIGGER },

@@ -2372,3 +2372,90 @@ button {
   touch-action: pan-y;
   overscroll-behavior: contain;
 }
+
+/* =========================================================================
+   Cohabitation avec le cadre de Home Assistant
+   ========================================================================= */
+
+/*
+ * Le rail de la barre latérale mord sur notre bord gauche.
+ *
+ * J'ai d'abord cherché à faire disparaître la barre : par l'événement de
+ * Home Assistant, qui enregistre une préférence globale et l'a laissée cachée
+ * partout ; puis par la largeur du tiroir, sans effet. Une barre qu'on masque
+ * doit pouvoir se rouvrir d'un geste, et rien ne le garantit depuis un panneau.
+ *
+ * On fait donc l'inverse, et c'est plus honnête : on ne touche à rien chez
+ * l'hôte, on décale notre propre contenu. Le texte du haut et le bouton de la
+ * bibliothèque cessent d'être coupés, et la scène reste centrée sur ce qui
+ * reste.
+ *
+ * La réserve ne s'applique qu'au panneau : la page autonome occupe tout l'écran
+ * et n'a personne à côté d'elle.
+ */
+:host {
+  --ha-rail: 56px;
+}
+
+:host .app {
+  padding-left: max(env(safe-area-inset-left), var(--ha-rail));
+}
+
+/* Écran étroit : Home Assistant replie entièrement sa barre, plus rien à
+   réserver. */
+@media (max-width: 870px) {
+  :host {
+    --ha-rail: 0px;
+  }
+}
+
+/* =========================================================================
+   Curseur de réglage
+   ========================================================================= */
+
+.field__value {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+
+.field input[type="range"] {
+  width: 100%;
+  height: 26px;
+  margin: 0;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+
+.field input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(0 0% 100% / 0.16);
+}
+
+.field input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 1px 4px hsl(0 0% 0% / 0.5);
+}
+
+.field input[type="range"]::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(0 0% 100% / 0.16);
+}
+
+.field input[type="range"]::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--ink);
+}

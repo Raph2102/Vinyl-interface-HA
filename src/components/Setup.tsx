@@ -295,6 +295,29 @@ export function Setup({
         )}
 
         <div className="field">
+          <label htmlFor="zoom">
+            Taille des pochettes
+            <span className="field__value">
+              {draft.libraryZoom === 1 ? "auto" : `${Math.round(draft.libraryZoom * 100)} %`}
+            </span>
+          </label>
+          <input
+            id="zoom"
+            type="range"
+            min={0.7}
+            max={1.6}
+            step={0.05}
+            value={draft.libraryZoom}
+            onChange={(e) => set("libraryZoom", Number(e.target.value))}
+          />
+          <small>
+            La taille s'ajuste déjà à l'écran ; ce curseur ne fait que la pondérer, et il reste
+            propre à cet appareil. Une tablette tenue à bout de bras demande des pochettes plus
+            grosses qu'un écran de bureau à cinquante centimètres.
+          </small>
+        </div>
+
+        <div className="field">
           <label htmlFor="label-text">Texte de l'étiquette</label>
           <input
             id="label-text"

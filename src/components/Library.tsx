@@ -39,6 +39,8 @@ interface LibraryProps {
   onQuery: (value: string) => void;
   /** Vrai pendant que la recherche est en vol. */
   searching: boolean;
+  /** Grossissement voulu, autour de la taille calculée. 1 = automatique. */
+  zoom: number;
 }
 
 /** Albums dessinés de part et d'autre de celui qu'on regarde. */
@@ -88,6 +90,7 @@ export function Library({
   query,
   onQuery,
   searching,
+  zoom,
 }: LibraryProps) {
   /**
    * Centre de la fenêtre rendue. C'est le SEUL état qui redessine le bac, et il
@@ -171,7 +174,18 @@ export function Library({
     const boite = crate.getBoundingClientRect();
     if (boite.width === 0 || boite.height === 0) return;
 
-    const cover = Math.round(Math.min(boite.height * 0.66, boite.width * 0.36));
+    /*
+     * La mesure automatique reste la base ; le réglage ne fait que la pondérer.
+     * Une tablette tenue à bout de bras demande des pochettes plus grosses qu'un
+     * écran de bureau à cinquante centimètres, et aucune formule ne devine cette
+     * distance-là. Les bornes évitent qu'un réglage extrême rende le bac
+     * inutilisable : jamais plus haut que la boîte, jamais plus petit qu'une
+     * vignette.
+     */
+    const base = Math.min(boite.height * 0.72, boite.width * 0.42);
+    const cover = Math.round(
+      Math.max(90, Math.min(boite.height * 0.94, boite.width * 0.6, base * zoom)),
+    );
     crate.style.setProperty("--cover", cover + "px");
     geo.current = { cover, radius: cover * RADIUS };
   }, []);

@@ -75,19 +75,12 @@ class Emprise {
   }
 }
 
-/** L'élément racine du frontend de Home Assistant, s'il est là. */
-function racineHa(): HTMLElement | null {
-  return document.querySelector("home-assistant");
-}
-
 class MdVinylPanel extends HTMLElement {
   private root: Root | null = null;
   private client: HassClient | null = null;
   private mounted = false;
   /** Tout ce qu on a modifié hors de notre arbre, et de quoi le défaire. */
   private emprise = new Emprise();
-  /** Séparée : la barre latérale peut être rendue avant qu on parte. */
-  private barre = new Emprise();
 
   /** Home Assistant écrit ici, souvent. */
   set hass(hass: HassLike) {
@@ -116,90 +109,25 @@ class MdVinylPanel extends HTMLElement {
   }
 
   /**
-   * La platine prend toute la place, le temps de la visite.
+   * Bloque le rebond du document, le temps de la visite.
    *
-   * Deux emprunts au document, tous deux réversibles et invisibles ailleurs :
+   * C'est lui qui déclenche le tirage-pour-rafraîchir. Le blocage posé dans
+   * notre arbre ne suffisait pas : le geste commence chez nous, mais la chaîne
+   * de défilement remonte jusqu'au document de Home Assistant, et c'est tout en
+   * haut que le navigateur décide de rafraîchir. Il faut donc le dire là aussi.
    *
-   * 1. LA LARGEUR DU TIROIR. Même repliée, la barre latérale laisse un rail
-   *    d'icônes qui mord sur la scène. On met sa largeur à zéro par les
-   *    variables que Home Assistant expose — une propriété personnalisée
-   *    traverse les frontières d'ombre, ce qui permet de l'atteindre sans aller
-   *    fouiller dans ses composants. La barre revient d'un glissement depuis le
-   *    bord gauche, et la préférence de l'utilisateur n'est pas touchée : sur
-   *    les autres pages, tout est comme avant.
-   *
-   * 2. LE REBOND DU DOCUMENT. C'est lui qui déclenche le tirage-pour-rafraîchir.
-   *    Le blocage posé dans notre arbre ne suffisait pas : le geste commence
-   *    chez nous, mais la chaîne de défilement remonte jusqu'au document de Home
-   *    Assistant, et c'est tout en haut que le navigateur décide de rafraîchir.
-   *    Il faut donc le dire là aussi.
+   * CE QU'ON NE FAIT PLUS : masquer la barre latérale. J'ai essayé deux voies —
+   * l'événement `hass-dock-sidebar`, qui enregistre une préférence globale et
+   * l'a laissée cachée partout, puis la largeur du tiroir par variable CSS, sans
+   * effet visible. Une barre qu'on masque doit pouvoir se rouvrir d'un geste, et
+   * rien dans le frontend ne le garantit depuis un panneau. On préfère donc
+   * décaler notre propre contenu : voir --ha-rail dans la feuille de style.
    */
   private prendreLaPlace(): void {
-    const racine = racineHa();
-    if (racine) {
-      this.barre.poser(racine, "--mdc-drawer-width", "0px");
-      this.barre.poser(racine, "--app-drawer-width", "0px");
-    }
     for (const cible of [document.documentElement, document.body]) {
       this.emprise.poser(cible, "overscroll-behavior", "none");
       this.emprise.poser(cible, "overscroll-behavior-y", "none");
     }
-    this.ecouterLeBordGauche();
-  }
-
-  /**
-   * Ramener la barre latérale d'un glissement depuis le bord gauche.
-   *
-   * Effacer la barre sans laisser de moyen de la rappeler serait un piège : sur
-   * une tablette, le panneau n'a pas de barre d'outils, donc plus rien pour
-   * revenir en arrière. On rend donc le geste que l'on attend à cet endroit —
-   * partir du bord et tirer vers la droite, là même où la barre se trouvait.
-   *
-   * Une fois rappelée, elle reste : on ne joue pas à la faire disparaître sous
-   * le doigt. Elle se remasque à la prochaine visite du panneau.
-   */
-  private ecouterLeBordGauche(): void {
-    /** Largeur de la zone d'amorce, en pixels. Assez large pour un pouce. */
-    const BORD = 28;
-    /** Course horizontale à franchir pour que ce soit un geste, pas un frôlement. */
-    const COURSE = 45;
-
-    let depart: { x: number; y: number } | null = null;
-
-    const debut = (e: TouchEvent) => {
-      const t = e.touches[0];
-      if (!t) return;
-      depart = t.clientX <= BORD ? { x: t.clientX, y: t.clientY } : null;
-    };
-
-    const bouge = (e: TouchEvent) => {
-      if (!depart) return;
-      const t = e.touches[0];
-      if (!t) return;
-      const dx = t.clientX - depart.x;
-      const dy = Math.abs(t.clientY - depart.y);
-      // Franchement horizontal, franchement vers la droite.
-      if (dx > COURSE && dx > dy * 1.5) {
-        depart = null;
-        this.barre.rendre();
-      }
-    };
-
-    const fin = () => {
-      depart = null;
-    };
-
-    this.addEventListener("touchstart", debut, { passive: true });
-    this.addEventListener("touchmove", bouge, { passive: true });
-    this.addEventListener("touchend", fin, { passive: true });
-    this.addEventListener("touchcancel", fin, { passive: true });
-
-    this.emprise.aussi(() => {
-      this.removeEventListener("touchstart", debut);
-      this.removeEventListener("touchmove", bouge);
-      this.removeEventListener("touchend", fin);
-      this.removeEventListener("touchcancel", fin);
-    });
   }
 
   private monter(): void {
@@ -264,7 +192,6 @@ class MdVinylPanel extends HTMLElement {
      * un disque. Et comme rien n'a été enregistré, même un échec ici se répare
      * d'un simple rechargement de page.
      */
-    this.barre.rendre();
     this.emprise.rendre();
 
     // Home Assistant détache le panneau quand on change d'onglet. On rend la

@@ -1100,6 +1100,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
           query={query}
           onQuery={setQuery}
           searching={searching}
+          zoom={settings.libraryZoom}
         />
       )}
 
