@@ -3,7 +3,6 @@
   "name": "MD Vinyl",
   "codeowners": ["@Raph2102"],
   "config_flow": true,
-  "dependencies": ["http", "panel_custom"],
   "documentation": "https://github.com/Raph2102/Vinyl-interface-HA",
   "integration_type": "service",
   "iot_class": "local_push",
