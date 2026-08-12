@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/icone.png" width="120" alt="MD Vinyl" />
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/icone.png" width="120" alt="MD Vinyl" />
 </p>
 
 <h1 align="center">MD Vinyl</h1>
@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/platine.jpg" alt="La platine en lecture" />
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/platine.jpg" alt="La platine en lecture" />
 </p>
 
 ---
@@ -48,7 +48,7 @@ Les pochettes rangées sur une roue, qu'on fait défiler au doigt. On en touche
 une, elle sort du bac et va se poser sur la platine.
 
 <p align="center">
-  <img src="docs/images/bibliotheque.jpg" alt="La bibliothèque en bac à disques" />
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/bibliotheque.jpg" alt="La bibliothèque en bac à disques" />
 </p>
 
 La recherche porte sur **tout le catalogue du fournisseur** — pas seulement sur
@@ -63,12 +63,12 @@ ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez D
     <td width="50%" valign="top">
       <b>La file d'attente</b><br />
       Ce qui va suivre, et on saute sur un morceau en le touchant.
-      <img src="docs/images/file.jpg" alt="La file d'attente" />
+      <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file.jpg" alt="La file d'attente" />
     </td>
     <td width="50%" valign="top">
       <b>Les enceintes</b><br />
       Changer de pièce, ou y <i>emmener</i> la musique en cours sans la couper.
-      <img src="docs/images/enceintes.jpg" alt="Le choix des enceintes" />
+      <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/enceintes.jpg" alt="Le choix des enceintes" />
     </td>
   </tr>
   <tr>
@@ -76,12 +76,12 @@ ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez D
       <b>Les paroles</b><br />
       Synchronisées, via <a href="https://lrclib.net">LRCLIB</a>. On touche une
       ligne pour y revenir.
-      <img src="docs/images/paroles.jpg" alt="Les paroles synchronisées" />
+      <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/paroles.jpg" alt="Les paroles synchronisées" />
     </td>
     <td width="50%" valign="top">
       <b>L'écran de repos</b><br />
       Une horloge, après quelques minutes sans musique ni geste.
-      <img src="docs/images/repos.jpg" alt="L'écran de repos" />
+      <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/repos.jpg" alt="L'écran de repos" />
     </td>
   </tr>
 </table>
@@ -108,10 +108,10 @@ alors de teinte avec l'album.
 
 <table>
   <tr>
-    <td width="25%"><img src="docs/images/matiere-marbre.jpg" alt="Marbré" /><p align="center"><b>Marbré</b></p></td>
-    <td width="25%"><img src="docs/images/matiere-eclaboussure.jpg" alt="Éclaboussé" /><p align="center"><b>Éclaboussé</b></p></td>
-    <td width="25%"><img src="docs/images/matiere-transparent.jpg" alt="Transparent" /><p align="center"><b>Transparent</b></p></td>
-    <td width="25%"><img src="docs/images/matiere-noir.jpg" alt="Noir" /><p align="center"><b>Noir</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/matiere-marbre.jpg" alt="Marbré" /><p align="center"><b>Marbré</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/matiere-eclaboussure.jpg" alt="Éclaboussé" /><p align="center"><b>Éclaboussé</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/matiere-transparent.jpg" alt="Transparent" /><p align="center"><b>Transparent</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/matiere-noir.jpg" alt="Noir" /><p align="center"><b>Noir</b></p></td>
   </tr>
 </table>
 
@@ -119,7 +119,7 @@ S'ajoutent le blanc et le teinté. Avec, dans les réglages, la taille des
 pochettes, le texte de l'étiquette, le fond adaptatif et la vitesse de rotation.
 
 <p align="center">
-  <img src="docs/images/reglages.jpg" width="70%" alt="Les réglages" />
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/reglages.jpg" width="70%" alt="Les réglages" />
 </p>
 
 ---
