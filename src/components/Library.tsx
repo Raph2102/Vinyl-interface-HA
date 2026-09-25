@@ -20,17 +20,25 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Album } from "../lib/library";
+import type { Media } from "../lib/library";
 import { NEUTRAL, extractPalette, type Palette } from "../lib/palette";
+import { Ambient } from "./Ambient";
+
+export type LibraryTab = "albums" | "playlists";
 
 interface LibraryProps {
-  albums: Album[];
+  items: Media[];
+  /** Ce que montre le bac : les albums, ou les playlists. */
+  tab: LibraryTab;
+  onTab: (tab: LibraryTab) => void;
+  /** Playlist des coups de cœur, jouable d'une touche depuis l'en-tête. */
+  favorite: Media | null;
   loading: boolean;
   error: string | null;
   /** Reçoit aussi l'élément touché : c'est le point de départ du vol vers la platine. */
-  onPlay: (album: Album, from: HTMLElement) => void;
+  onPlay: (item: Media, from: HTMLElement) => void;
   onClose: () => void;
-/** Position retenue de la visite précédente, ou null si c'est la première. */
+  /** Position retenue de la visite précédente, ou null si c'est la première. */
   resumeIndex: number | null;
   /** Remonté à chaque cran franchi, pour retrouver sa place au retour. */
   onFocusChange: (index: number) => void;
@@ -80,7 +88,10 @@ const DRAG_RATIO = 0.5;
 const MAX_FLING = 2;
 
 export function Library({
-  albums,
+  items: albums,
+  tab,
+  onTab,
+  favorite,
   loading,
   error,
   onPlay,
@@ -110,11 +121,20 @@ export function Library({
    * d'œil — c'est ainsi qu'on retrouve un album dans un vrai bac.
    */
   const [palettes, setPalettes] = useState<Record<string, Palette>>({});
+  /**
+   * Pochette qui teinte le fond : celle qu'on regarde. Elle ne suit le bac
+   * qu'une fois le geste posé — changer de fond à chaque album survolé ferait
+   * clignoter tout l'écran pendant un lancer.
+   */
+  const [ambient, setAmbient] = useState<string | null>(null);
 
   const crateRef = useRef<HTMLDivElement>(null);
+  const captionRef = useRef<HTMLDivElement>(null);
+  const itemsRef = useRef(albums);
+  itemsRef.current = albums;
   const offset = useRef(resumeIndex ?? 0);
-  /** La position d'ouverture n'est posée qu'une fois. */
-  const placed = useRef(false);
+  /** Bac dans lequel la position d'ouverture a été posée (une fois par bac). */
+  const placed = useRef<LibraryTab | null>(null);
   const velocity = useRef(0);
   const dragging = useRef(false);
   /** Le geste en cours a bougé : le clic qui suit ne doit pas choisir d'album. */
@@ -250,12 +270,25 @@ export function Library({
    * sur la première pochette au lieu de la quatorzième.
    */
   useEffect(() => {
-    if (placed.current || count === 0) return;
-    placed.current = true;
-    const target = resumeIndex ?? Math.floor(count / 2);
+    /*
+     * Une fois par bac : changer d'onglet, c'est changer de bac, et on se
+     * replace dans le nouveau DANS LA MÊME PASSE. Fait en deux temps, la boucle
+     * avait le temps de rapporter la position de l'ancien bac comme celle du
+     * nouveau — les playlists s'ouvraient au rang où l'on avait laissé les
+     * albums.
+     */
+    if (placed.current === tab || count === 0) return;
+    placed.current = tab;
+    /*
+     * Au milieu, même pour les playlists : ouvrir sur la première laissait la
+     * moitié gauche du bac vide. Les coups de cœur, épinglés en tête, ont leur
+     * propre raccourci dans l'en-tête.
+     */
+    const target = Math.min(last, resumeIndex ?? Math.floor(count / 2));
+    velocity.current = 0;
     write(target);
     setAnchor(target);
-  }, [count, resumeIndex, write]);
+  }, [count, last, resumeIndex, tab, write]);
 
   /*
    * Une recherche remplace le contenu du bac : rester au quatorzième cran d'une
@@ -281,6 +314,7 @@ export function Library({
     let raf = 0;
     let previous = performance.now();
     let shown = -1;
+    let settle: ReturnType<typeof setTimeout> | undefined;
 
     const frame = (now: number) => {
       const dt = Math.min(0.05, (now - previous) / 1000);
@@ -312,16 +346,36 @@ export function Library({
         // suivant. Android répond ; iOS n'expose aucune API de vibration au web.
         if (shown !== -1) navigator.vibrate?.(8);
         shown = rounded;
-            onFocusChange(rounded);
+        onFocusChange(rounded);
         setAnchor((a) => (Math.abs(rounded - a) >= SHIFT ? rounded : a));
+
+        /*
+         * La légende s'écrit à la main : elle change à chaque cran franchi, et
+         * repasser par React à ce rythme redessinerait tout le bac en plein
+         * lancer.
+         */
+        const item = itemsRef.current[rounded];
+        const legende = captionRef.current;
+        if (legende) {
+          legende.querySelector("b")!.textContent = item?.name ?? "";
+          legende.querySelector("span")!.textContent = item ? describe(item) : "";
+          legende.dataset.pinned = String(Boolean(item?.pinned));
+        }
+        clearTimeout(settle);
+        settle = setTimeout(() => setAmbient(item?.image ?? null), 260);
       }
 
       raf = requestAnimationFrame(frame);
     };
 
     raf = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(raf);
-  }, [count, last, write, onFocusChange]);
+    return () => {
+      cancelAnimationFrame(raf);
+      clearTimeout(settle);
+    };
+    // Relancée quand le contenu change (onglet, recherche) : la légende et le
+    // fond doivent se réécrire même si le rang de face reste le même.
+  }, [albums, count, last, write, onFocusChange]);
 
   /**
    * Distance à l'écran entre deux albums, en pixels.
@@ -438,6 +492,8 @@ export function Library({
 
   return (
     <div className="library">
+      <Ambient image={ambient} className="library__ambient" />
+
       <header className="library__head">
         <button className="iconbtn iconbtn--small" onClick={onClose} aria-label="Retour à la platine">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -459,7 +515,7 @@ export function Library({
           <input
             type="search"
             value={query}
-            placeholder="Chercher un album, un artiste…"
+            placeholder={tab === "playlists" ? "Chercher une playlist…" : "Chercher un album, un artiste…"}
             aria-label="Chercher dans Deezer"
             onChange={(e) => onQuery(e.target.value)}
           />
@@ -469,10 +525,55 @@ export function Library({
             </button>
           )}
         </label>
+        <div className="library__tabs" role="tablist" aria-label="Contenu du bac">
+          {(
+            [
+              ["albums", "Albums"],
+              ["playlists", "Playlists"],
+            ] as const
+          ).map(([valeur, libelle]) => (
+            <button
+              key={valeur}
+              role="tab"
+              aria-selected={tab === valeur}
+              data-on={tab === valeur}
+              onClick={() => onTab(valeur)}
+            >
+              {libelle}
+            </button>
+          ))}
+        </div>
+        {/*
+          * Les coups de cœur, d'une touche : c'est la playlist qu'on relance le
+          * plus souvent, elle ne doit pas se chercher au bout du bac.
+          */}
+        {favorite && (
+          <button
+            className="library__fav"
+            title={`Écouter « ${favorite.name} »`}
+            onClick={(e) => {
+              if (busy) return;
+              setBusy(true);
+              onPlay(favorite, e.currentTarget);
+            }}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 20.6 10.6 19.3C5.6 14.8 2.3 11.8 2.3 8.1 2.3 5.1 4.6 2.8 7.6 2.8c1.7 0 3.3.8 4.4 2 1.1-1.2 2.7-2 4.4-2 3 0 5.3 2.3 5.3 5.3 0 3.7-3.3 6.7-8.3 11.2L12 20.6z"
+                fill="currentColor"
+              />
+            </svg>
+            <span>{favorite.name}</span>
+          </button>
+        )}
         <span className="library__count">
           {loading || searching
             ? "recherche…"
-            : `${count} album${count > 1 ? "s" : ""}`}
+            : query.trim()
+              ? `${count} résultat${count > 1 ? "s" : ""}`
+              : tab === "playlists"
+                ? `${count} playlist${count > 1 ? "s" : ""}`
+                : `${count} album${count > 1 ? "s" : ""}`}
         </span>
       </header>
 
@@ -545,6 +646,23 @@ export function Library({
         ))}
       </div>
 
+      {/*
+        * L'album de face ne montre que sa tranche : trois millimètres de texte
+        * vertical. On l'écrit donc en clair sous le bac — c'est ce qu'on lirait
+        * en penchant la tête devant un vrai présentoir.
+        */}
+      <div className="library__caption" ref={captionRef}>
+        <b />
+        <span />
+      </div>
+
     </div>
   );
+}
+
+/** Seconde ligne de la légende : l'artiste, ou ce qu'est l'objet. */
+function describe(item: Media): string {
+  if (item.kind === "playlist") return item.pinned ? "Vos coups de cœur" : "Playlist";
+  if (item.kind === "track") return item.artist ? `${item.artist} · titre` : "Titre";
+  return item.artist;
 }

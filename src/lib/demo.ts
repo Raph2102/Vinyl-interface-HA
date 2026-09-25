@@ -45,6 +45,15 @@ export function injectedAlbums(): DemoAlbum[] | null {
   return Array.isArray(posees) && posees.length > 0 ? posees : null;
 }
 
+/** Même principe pour les playlists : leurs vraies pochettes, pour les captures. */
+export function injectedPlaylists(): { name: string; image: string }[] | null {
+  if (!isDemo()) return null;
+  const posees = (
+    window as unknown as { __MD_VINYL_PLAYLISTS__?: { name: string; image: string }[] }
+  ).__MD_VINYL_PLAYLISTS__;
+  return Array.isArray(posees) && posees.length > 0 ? posees : null;
+}
+
 const FEATURES =
   Feature.PAUSE |
   Feature.SEEK |

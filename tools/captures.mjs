@@ -7,8 +7,8 @@
  * donc jamais l'enceinte ni les pièces de qui que ce soit.
  *
  * Les POCHETTES, elles, sont réelles : celles de la bibliothèque Music
- * Assistant, lues dans Home Assistant et posées dans la page avant son
- * chargement. Les illustrations générées faisaient l'affaire pour régler
+ * Assistant — albums et playlists —, lues dans Home Assistant EN LECTURE SEULE
+ * et posées dans la page avant son chargement. Les illustrations générées faisaient l'affaire pour régler
  * l'interface, mais elles donnaient des captures qui sentaient le gabarit.
  *
  * Rendu à deux fois la résolution : sur un écran dense, une capture à l'échelle
@@ -65,6 +65,7 @@ async function vraiesPochettes() {
 
   return await new Promise((resolve) => {
     const albums = [];
+    let playlists = [];
     const vus = new Set();
     let ws;
 
@@ -74,7 +75,7 @@ async function vraiesPochettes() {
       return resolve(null);
     }
 
-    const rendre = () => resolve(albums.length > 0 ? albums : null);
+    const rendre = () => resolve(albums.length > 0 ? { albums, playlists } : null);
 
     const abandon = setTimeout(() => {
       try {
@@ -164,6 +165,30 @@ async function vraiesPochettes() {
 
       if (m.id === 2) {
         ranger(m.result?.response?.items);
+        ws.send(
+          JSON.stringify({
+            id: id++,
+            type: "call_service",
+            domain: "music_assistant",
+            service: "get_library",
+            service_data: { config_entry_id: entree, media_type: "playlist", limit: 100, order_by: "sort_name" },
+            return_response: true,
+          }),
+        );
+        return;
+      }
+
+      if (m.id === 3) {
+        /*
+         * Les images des playlists que Music Assistant génère sont servies par
+         * son propre serveur, injoignable depuis la page de captures : on les
+         * laisse vides, l'app dessine alors leur pochette — comme elle le fait
+         * pour de vrai avec cette image partagée.
+         */
+        playlists = (m.result?.response?.items ?? []).map((p) => {
+          const image = typeof p.image === "string" ? p.image : (p.image?.path ?? "");
+          return { name: String(p.name), image: image.includes(":8095/") ? "" : image };
+        });
         if (albums.length >= 16) return terminer();
         return chercher();
       }
@@ -253,9 +278,14 @@ await envoyer("Emulation.setDeviceMetricsOverride", {
 // trouve déjà là au démarrage, sans avoir à recharger ni à attendre.
 const pochettes = await vraiesPochettes();
 if (pochettes) {
-  console.log(`pochettes réelles : ${pochettes.length} albums`);
+  console.log(`pochettes réelles : ${pochettes.albums.length} albums, ${pochettes.playlists.length} playlists`);
   await envoyer("Page.addScriptToEvaluateOnNewDocument", {
-    source: "window.__MD_VINYL_ALBUMS__ = " + JSON.stringify(pochettes) + ";",
+    source:
+      "window.__MD_VINYL_ALBUMS__ = " +
+      JSON.stringify(pochettes.albums) +
+      ";\nwindow.__MD_VINYL_PLAYLISTS__ = " +
+      JSON.stringify(pochettes.playlists) +
+      ";",
   });
 } else {
   console.log("pochettes réelles indisponibles — on garde celles de la démonstration");
@@ -302,12 +332,35 @@ await capturer("platine");
 await aller("?demo=1&lib=1", 4600);
 await capturer("bibliotheque");
 
-// 3. La file d'attente.
-await aller("?demo=1", 4200);
-await reveiller();
-await evaluer(`document.querySelector('[title="À suivre"]')?.click()`);
-await sleep(1600);
+// 2 bis. Les playlists, coups de cœur en raccourci.
+await aller("?demo=1&playlists=1", 4600);
+await capturer("playlists");
+
+// 3. La file d'attente, puis pendant qu'on y déplace un morceau.
+await aller("?demo=1&queue=1", 4200);
 await capturer("file");
+
+{
+  const prise = JSON.parse(
+    await evaluer(`JSON.stringify((() => {
+      const lignes = [...document.querySelectorAll(".queue__item")];
+      const g = document.querySelectorAll(".queue__grip")[1].getBoundingClientRect();
+      const pas = lignes[1].getBoundingClientRect().top - lignes[0].getBoundingClientRect().top;
+      return { x: g.left + g.width / 2, y: g.top + g.height / 2, pas };
+    })())`),
+  );
+  const souris = (type, y, buttons) =>
+    envoyer("Input.dispatchMouseEvent", { type, x: prise.x, y, button: "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+  await souris("mousePressed", prise.y, 1);
+  for (let k = 1; k <= 12; k++) {
+    await souris("mouseMoved", prise.y + (prise.pas * 2.4 * k) / 12, 1);
+    await sleep(30);
+  }
+  await sleep(400);
+  await capturer("file-deplacer");
+  await souris("mouseReleased", prise.y + prise.pas * 2.4, 0);
+  await sleep(600);
+}
 
 // 4. Les enceintes.
 await aller("?demo=1", 4200);

@@ -342,6 +342,11 @@ export class HaClient {
     return result?.response ?? result;
   }
 
+  /** Commande WebSocket brute : le superviseur, pour joindre Music Assistant. */
+  callWS<T = unknown>(message: Record<string, unknown>): Promise<T> {
+    return this.request<T>(message);
+  }
+
   /**
    * Identifiant d'entrée de configuration d'une intégration.
    * Les actions de bibliothèque de Music Assistant se ciblent par là, et cette

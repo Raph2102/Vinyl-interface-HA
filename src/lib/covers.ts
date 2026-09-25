@@ -112,6 +112,76 @@ export function generateCover(seed: string, size = 640): string {
 
   // Grain léger : sans lui, les aplats paraissent trop numériques à côté des
   // vraies pochettes.
+  addGrain(ctx, size);
+
+  const url = canvas.toDataURL("image/jpeg", 0.86);
+  cache.set(seed, url);
+  return url;
+}
+
+/**
+ * Pochette des coups de cœur : un cœur sur un dégradé grenat.
+ *
+ * Music Assistant fabrique ses playlists à lui (« All favorited tracks »,
+ * « Recently played »…) avec une seule et même image de remplacement. Dans un
+ * bac à disques, huit pochettes identiques se lisent comme un bug ; celle des
+ * favoris, qu'on vient chercher le plus souvent, mérite en plus de se
+ * reconnaître au premier coup d'œil.
+ */
+export function favoriteCover(size = 640): string {
+  const key = `♥:${size}`;
+  const cached = cache.get(key);
+  if (cached) return cached;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+
+  const fond = ctx.createLinearGradient(0, 0, size, size);
+  fond.addColorStop(0, "hsl(346 68% 34%)");
+  fond.addColorStop(1, "hsl(326 62% 15%)");
+  ctx.fillStyle = fond;
+  ctx.fillRect(0, 0, size, size);
+
+  // Des sillons en fond, très discrets : ça reste une pochette de disque.
+  ctx.strokeStyle = "hsl(0 0% 100% / 0.05)";
+  ctx.lineWidth = size * 0.006;
+  for (let r = size * 0.08; r < size * 0.95; r += size * 0.028) {
+    ctx.beginPath();
+    ctx.arc(size * 0.5, size * 0.54, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Le cœur : deux arcs et une pointe, tracés en courbes de Bézier.
+  const s = size * 0.36;
+  const cx = size / 2;
+  const cy = size * 0.47;
+  ctx.save();
+  ctx.shadowColor = "hsl(330 80% 8% / 0.5)";
+  ctx.shadowBlur = size * 0.05;
+  ctx.shadowOffsetY = size * 0.015;
+  // Un cœur rose et non blanc : flouté en fond d'écran, du blanc donnait une
+  // tache grise ; du rose donne une lueur.
+  const coeur = ctx.createLinearGradient(0, cy - s, 0, cy + s);
+  coeur.addColorStop(0, "hsl(352 100% 76%)");
+  coeur.addColorStop(1, "hsl(340 88% 58%)");
+  ctx.fillStyle = coeur;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + s * 0.95);
+  ctx.bezierCurveTo(cx - s * 1.35, cy + s * 0.05, cx - s * 0.85, cy - s * 0.95, cx, cy - s * 0.38);
+  ctx.bezierCurveTo(cx + s * 0.85, cy - s * 0.95, cx + s * 1.35, cy + s * 0.05, cx, cy + s * 0.95);
+  ctx.fill();
+  ctx.restore();
+
+  addGrain(ctx, size);
+  const url = canvas.toDataURL("image/jpeg", 0.88);
+  cache.set(key, url);
+  return url;
+}
+
+function addGrain(ctx: CanvasRenderingContext2D, size: number): void {
   const noise = ctx.getImageData(0, 0, size, size);
   for (let i = 0; i < noise.data.length; i += 4) {
     const n = (Math.random() - 0.5) * 9;
@@ -120,10 +190,6 @@ export function generateCover(seed: string, size = 640): string {
     noise.data[i + 2] = clamp((noise.data[i + 2] ?? 0) + n);
   }
   ctx.putImageData(noise, 0, 0);
-
-  const url = canvas.toDataURL("image/jpeg", 0.86);
-  cache.set(seed, url);
-  return url;
 }
 
 function clamp(v: number): number {

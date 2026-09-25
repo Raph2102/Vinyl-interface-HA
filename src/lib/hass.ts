@@ -143,6 +143,11 @@ export class HassClient implements PlayerClient {
     return result?.response ?? result;
   }
 
+  /** Commande WebSocket brute : le superviseur, pour joindre Music Assistant. */
+  callWS<T = unknown>(message: Record<string, unknown>): Promise<T> {
+    return this.hass.callWS<T>(message);
+  }
+
   /** L'entrée de configuration de Music Assistant, que ciblent get_library et search. */
   async configEntry(domain: string): Promise<string | null> {
     const entries = await this.hass.callWS<{ domain: string; entry_id: string }[]>({

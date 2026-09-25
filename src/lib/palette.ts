@@ -14,6 +14,13 @@ export interface Palette {
   b: string;
   /** Ombre profonde, tirée de la dominante : sert de base au fond. */
   deep: string;
+  /**
+   * La couleur la plus VIVE de la pochette, ravivée : c'est celle d'un vinyle
+   * coloré. La dominante convient à un fond, pas à un pigment — sur une
+   * pochette sombre ou photographique, elle tombe dans le brun gris, et le
+   * marbré ressemblait alors à des nuages sales.
+   */
+  vivid: string;
   /** Couleur de texte lisible par-dessus. */
   text: string;
   isDark: boolean;
@@ -22,6 +29,7 @@ export interface Palette {
 export const NEUTRAL: Palette = {
   a: "hsl(220 4% 46%)",
   b: "hsl(220 5% 34%)",
+  vivid: "hsl(24 55% 45%)",
   deep: "hsl(220 6% 14%)",
   text: "hsl(0 0% 100%)",
   isDark: true,
@@ -131,9 +139,34 @@ function analyse(img: HTMLImageElement): Palette {
     ? hsl(second.h, clamp(second.s, 0.15, 0.8), clamp(second.l, 0.22, 0.55))
     : hsl((first.h + 28) % 360, clamp(first.s * 0.8, 0.12, 0.7), clamp(first.l - 0.14, 0.18, 0.5));
 
+  /*
+   * La plus vive : une teinte franche qui occupe au moins une petite surface
+   * (un gilet rouge, un néon), plutôt que la plus étendue. Puis on la ravive —
+   * un pigment de vinyle n'est jamais délavé.
+   */
+  const seuil = pixels * 0.015;
+  // La saturation compte au carré, la surface à peine : sans quoi une grande
+  // plage de peau l'emportait sur la veste rouge qui fait toute la pochette.
+  const vivacite = (c: (typeof candidates)[number]) =>
+    c.s * c.s * (1 - Math.abs(c.l - 0.5)) * Math.pow(c.count, 0.35);
+  const vive =
+    [...candidates]
+      .filter((c) => c.count >= seuil && c.l > 0.12 && c.l < 0.9)
+      .sort((x, y) => vivacite(y) - vivacite(x))[0] ?? first;
+  /*
+   * Une pochette sans couleur ne reçoit pas une couleur inventée : elle donne
+   * un marbré noir et blanc. Anthracite franc, pas gris moyen — un gris à mi-
+   * chemin sur de la pâte crème, c'était exactement l'effet « nuages sales ».
+   */
+  const vivid =
+    vive.s < 0.12
+      ? hsl(vive.h, Math.min(vive.s, 0.05), 0.2)
+      : hsl(vive.h, clamp(Math.max(vive.s, 0.55), 0.55, 0.85), clamp(vive.l, 0.4, 0.56));
+
   return {
     a,
     b,
+    vivid,
     deep: hsl(first.h, clamp(first.s * 0.55, 0.08, 0.4), 0.13),
     text: "hsl(0 0% 100%)",
     isDark,

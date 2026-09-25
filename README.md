@@ -51,8 +51,34 @@ une, elle sort du bac et va se poser sur la platine.
   <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/bibliotheque.jpg" alt="La bibliothèque en bac à disques" />
 </p>
 
-La recherche porte sur **tout le catalogue du fournisseur** — pas seulement sur
-ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez Deezer.
+Le fond reprend la pochette qu'on regarde, et le nom de l'album de face
+s'écrit en clair sous le bac. La recherche porte sur **tout le catalogue du
+fournisseur** — pas seulement sur ce qui a été ajouté à la bibliothèque. Taper
+« Miles » va chercher chez Deezer.
+
+### Les playlists, et vos coups de cœur
+
+Un second bac, pour les playlists : celles du fournisseur comme celles que
+Music Assistant fabrique. On en pose une, et **toute la playlist** part dans la
+file. Les coups de cœur ont leur raccourci dans l'en-tête — une touche, et la
+musique démarre.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/playlists.jpg" alt="Le bac des playlists, avec le raccourci Coups de cœur" />
+</p>
+
+---
+
+## La file d'attente, qu'on range au doigt
+
+Toute la file, pas seulement le morceau suivant. On touche un morceau pour y
+aller ; on le **prend par sa poignée** (les trois barres, à droite) ou par un
+**appui long**, et on le pose où l'on veut. Les autres s'écartent pour lui faire
+place, et la liste se met à jour toute seule quand la file change ailleurs.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file-deplacer.jpg" alt="Un morceau déplacé dans la file" />
+</p>
 
 ---
 
@@ -62,7 +88,8 @@ ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez D
   <tr>
     <td width="50%" valign="top">
       <b>La file d'attente</b><br />
-      Ce qui va suivre, et on saute sur un morceau en le touchant.
+      Ce qui va suivre, avec sa durée totale ; on saute sur un morceau en le
+      touchant.
       <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file.jpg" alt="La file d'attente" />
     </td>
     <td width="50%" valign="top">
@@ -74,8 +101,9 @@ ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez D
   <tr>
     <td width="50%" valign="top">
       <b>Les paroles</b><br />
-      Synchronisées, via <a href="https://lrclib.net">LRCLIB</a>. On touche une
-      ligne pour y revenir.
+      Synchronisées : celles que Music Assistant tient du fournisseur quand il
+      les a, sinon <a href="https://lrclib.net">LRCLIB</a>. On touche une ligne
+      pour y revenir.
       <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/paroles.jpg" alt="Les paroles synchronisées" />
     </td>
     <td width="50%" valign="top">
@@ -95,6 +123,8 @@ ce qui a été ajouté à la bibliothèque. Taper « Miles » va chercher chez D
 | **Glisser le bras** le long du sillon | Se déplacer dans le morceau |
 | **Balayer** horizontalement | Morceau précédent / suivant |
 | **Toucher la pochette** | La faire passer devant le disque |
+| **Tenir la poignée ≡** d'un morceau, ou **appuyer longuement** dessus | Le déplacer dans la file |
+| Flèches ↑ ↓ sur une poignée | Déplacer le morceau d'un rang, au clavier |
 | Ne rien faire quatre secondes | Les commandes s'effacent |
 
 Un réglage remplace l'aiguille par un bouton classique, si on préfère.
@@ -104,7 +134,9 @@ Un réglage remplace l'aiguille par un bouton classique, si on préfère.
 ## Six matières de disque
 
 Au choix, ou reprenant la couleur de la pochette en cours — le disque change
-alors de teinte avec l'album.
+alors de teinte avec l'album. C'est la couleur la plus **vive** de la pochette
+qui est retenue, pas la plus étendue : la dominante d'une photo tombe souvent
+dans le brun gris, un pigment de vinyle jamais.
 
 <table>
   <tr>
@@ -155,6 +187,15 @@ porte-cellule est incliné de 30°, et une fois tourné, la pointe se retrouve �
 0,957 de la longueur du bras, décalée de 5,5° par rapport à son axe. Tant qu'on
 plaçait le bout du bras, on plaçait un point qui n'existe pas.
 
+**La file ne passe pas par Home Assistant.** Son action `get_queue` ne rend
+qu'un résumé — le morceau en cours, le suivant, et le *nombre* de morceaux — et
+aucune action ne permet d'en déplacer un. Music Assistant, lui, sait tout faire,
+mais son API exige une authentification… sauf quand on l'atteint par l'ingress
+de Home Assistant, comme le fait son propre panneau dans la barre latérale. La
+platine emprunte le même chemin : le superviseur délivre une session d'ingress,
+et le WebSocket de Music Assistant s'ouvre au nom de la personne connectée. Rien
+à configurer, et les changements arrivent en direct.
+
 **La position de lecture est interpolée.** Home Assistant n'envoie pas un flux
 continu : il envoie une position figée accompagnée de `media_position_updated_at`.
 Le mouvement du bras et le compteur sont calculés localement à partir de ces
@@ -176,7 +217,13 @@ bibliothèque ni faire de recherche.
 
 **Music Assistant est optionnel mais recommandé.** Sans lui, la platine affiche
 et commande n'importe quel `media_player`. Avec lui s'ajoutent la bibliothèque,
-la recherche, la file d'attente et le transfert entre pièces.
+les playlists, la recherche, la file d'attente et le transfert entre pièces.
+
+**La file complète et son rangement demandent Music Assistant en module
+complémentaire** (Home Assistant OS ou supervisé) et un compte administrateur :
+c'est par le superviseur que passe la liaison. Ailleurs — Music Assistant en
+Docker, par exemple — la file montre le morceau en cours et le suivant, et le
+dit.
 
 **Les pochettes viennent du fournisseur.** Elles sont chargées depuis son CDN et
 lues dans un canvas pour en extraire les couleurs du fond adaptatif — ce qui
@@ -197,8 +244,8 @@ Le dépôt contient de quoi vérifier sans instance sous la main :
 
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
-| `npm run fake-ha` | Un faux Home Assistant qui parle le vrai protocole — poignée de main du WebSocket, format compressé des états, actions avec réponse — et renvoie des charges utiles Music Assistant de forme réaliste. |
-| `npm run check:ha` | Une cinquantaine de contrôles de bout en bout contre ce faux serveur, dans un vrai navigateur : ce que l'app **affiche**, et ce qu'elle **envoie**. |
+| `npm run fake-ha` | Un faux Home Assistant qui parle le vrai protocole — poignée de main du WebSocket, format compressé des états, actions avec réponse — et, derrière un faux ingress, un faux Music Assistant : session, cookie, file, déplacements avec les mêmes refus que le vrai, événements. Les formes des réponses sont relevées sur une vraie installation. |
+| `npm run check:ha` | Plus de quatre-vingts contrôles de bout en bout contre ce faux serveur, dans un vrai navigateur : ce que l'app **affiche**, et ce qu'elle **envoie**. Avant le moindre clic, il prouve qu'il parle bien au faux serveur, et s'arrête sinon. |
 | `npm run check:gestures` | Les gestes, pilotés par le protocole DevTools : poser l'aiguille, la retirer, balayer. |
 | `npm run diagnose` | Diagnostic complet d'une vraie installation, étape par étape. |
 | `npm run check:real` | L'app entière contre une vraie instance, en lecture seule. |

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { Ambient } from "./components/Ambient";
 import { Controls, TopBar } from "./components/Controls";
-import { Library } from "./components/Library";
+import { Library, type LibraryTab } from "./components/Library";
 import { LyricsPane } from "./components/LyricsPane";
 import { Queue } from "./components/Queue";
 import { Rest } from "./components/Rest";
@@ -23,14 +24,24 @@ import { ARM_REST_ANGLE, armAngleForProgress } from "./lib/geometry";
 import {
   demoLibrary,
   haLibrary,
-  type Album,
   type LibrarySource,
+  type Media,
   type QueueItem,
+  type QueueView,
+  type SearchResults,
 } from "./lib/library";
+import { MassLink } from "./lib/mass";
 import { NO_LYRICS, fetchLyrics, lineAt, parseLrc, type Lyrics } from "./lib/lyrics";
 import { NEUTRAL, extractPalette, type Palette } from "./lib/palette";
 import { formatTime, readPlayback, syncClock } from "./lib/position";
-import { isArmed, isConfigured, loadSettings, saveSettings, type Settings } from "./lib/settings";
+import {
+  baseUrl,
+  isArmed,
+  isConfigured,
+  loadSettings,
+  saveSettings,
+  type Settings,
+} from "./lib/settings";
 import type { ConnectionStatus, HaEntity, PlayerClient } from "./lib/types";
 
 declare const __BUILD_ID__: string;
@@ -41,6 +52,15 @@ const QUIET_AFTER = 3800;
 const LYRIC_LEAD = 0.25;
 
 const DEMO = isDemo();
+
+const EMPTY_QUEUE: QueueView = {
+  items: [],
+  current: -1,
+  locked: Infinity,
+  full: false,
+  total: 0,
+  note: null,
+};
 
 /**
  * @param embedded  Client fourni par Home Assistant quand l'app tourne comme
@@ -70,17 +90,20 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
   const [lyricIndex, setLyricIndex] = useState(-1);
 
   const [showLibrary, setShowLibrary] = useState(false);
-  const [albums, setAlbums] = useState<Album[]>([]);
+  const [libraryTab, setLibraryTab] = useState<LibraryTab>(() =>
+    DEMO && new URLSearchParams(window.location.search).has("playlists") ? "playlists" : "albums",
+  );
+  const [albums, setAlbums] = useState<Media[]>([]);
+  const [playlists, setPlaylists] = useState<Media[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Album[] | null>(null);
+  const [results, setResults] = useState<SearchResults | null>(null);
   const [searching, setSearching] = useState(false);
 
   const [showQueue, setShowQueue] = useState(false);
-  const [queueItems, setQueueItems] = useState<QueueItem[]>([]);
-  const [queueCurrent, setQueueCurrent] = useState(-1);
+  const [queue, setQueue] = useState<QueueView>(EMPTY_QUEUE);
   /** Morceau visé par un saut, tant que Home Assistant n'a pas confirmé. */
   const [queuePending, setQueuePending] = useState<string | null>(null);
   const [queueLoading, setQueueLoading] = useState(false);
@@ -100,6 +123,8 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
   const rootRef = useRef<HTMLDivElement>(null);
   const timeRef = useRef<HTMLSpanElement>(null);
   const clientRef = useRef<PlayerClient | null>(null);
+  /** Liaison directe à Music Assistant, pour la file complète. Voir mass.ts. */
+  const massRef = useRef<MassLink | null>(null);
   const armOverride = useRef<number | null>(null);
 
   // Cibles écrites image par image, sans passer par React ni par la racine.
@@ -137,6 +162,8 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
         setEntity(next);
       };
       embedded.connect([entityId]);
+      const mass = new MassLink(embedded);
+      massRef.current = mass;
 
       /*
        * L'heure du serveur est relevée AUSSI dans le panneau.
@@ -155,9 +182,12 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
        */
       void syncClock({ haUrl: "", token: "" });
 
-      // Pas de close() : la connexion appartient à Home Assistant, pas à nous.
-      // On se contente de changer l'entité observée.
-      return;
+      // Pas de close() sur le client : la connexion appartient à Home
+      // Assistant, pas à nous. La liaison Music Assistant, elle, est la nôtre.
+      return () => {
+        mass.close();
+        if (massRef.current === mass) massRef.current = null;
+      };
     }
 
     if (!DEMO && (!token || !entityId)) return;
@@ -175,10 +205,19 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     };
     client.connect([entityId]);
     if (!DEMO) void syncClock(connection);
+    /*
+     * La page autonome joint Music Assistant par la même porte que le panneau :
+     * l'ingress de Home Assistant. Cela suppose qu'elle soit servie par lui
+     * (config/www/) — le cookie de session doit partir vers la même adresse.
+     */
+    const mass = DEMO ? null : new MassLink(client as HaClient, baseUrl(connection));
+    massRef.current = mass;
 
     return () => {
       client.close();
+      mass?.close();
       clientRef.current = null;
+      if (massRef.current === mass) massRef.current = null;
     };
   }, [embedded, haUrl, token, entityId]);
 
@@ -229,17 +268,39 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     setLyricsLoading(true);
     setLyricIndex(-1);
 
-    fetchLyrics({ title, artist, album, duration }, controller.signal)
-      .then((found) => {
+    /*
+     * D'abord les paroles que Music Assistant tient déjà du fournisseur : elles
+     * sont celles de CE pressage, donc calées à la seconde. LRCLIB ne vient
+     * qu'ensuite — une base communautaire doit deviner la version jouée, et
+     * c'est là que naissaient les décalages.
+     */
+    const exactes = async (): Promise<Lyrics | null> => {
+      try {
+        const lrc = await source()?.currentLyrics(title);
+        const lines = lrc ? parseLrc(lrc) : [];
+        return lines.length > 0 ? { lines, synced: true, plain: null, instrumental: false } : null;
+      } catch {
+        return null;
+      }
+    };
+
+    void (async () => {
+      try {
+        const found =
+          (await exactes()) ??
+          (await fetchLyrics({ title, artist, album, duration }, controller.signal));
+        if (controller.signal.aborted) return;
         lyricsRef.current = found;
         setLyrics(found);
         setLyricsLoading(false);
-      })
-      .catch(() => {
+      } catch {
         /* requête annulée par un changement de morceau : rien à signaler */
-      });
+      }
+    })();
 
     return () => controller.abort();
+    // `source` change avec l'enceinte, ce qui relance aussi la recherche : voulu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settings.lyrics, title, artist, album, duration]);
 
   // ------------------------------------------------------------- animation
@@ -347,7 +408,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
      * dominante de la pochette : le disque change alors avec la musique, ce qui
      * est le comportement qu'on attend par défaut.
      */
-    root.style.setProperty("--vinyl-tint", settings.vinylTint || palette.a);
+    root.style.setProperty("--vinyl-tint", settings.vinylTint || palette.vivid);
   }, [palette, settings.vinylTint]);
 
   // ------------------------------------------------------------- activité
@@ -415,8 +476,8 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
   // ------------------------------------------------------------- bibliothèque
 
   const librarySource = useRef<LibrarySource | null>(null);
-  /** Dernière pochette regardée dans le bac ; null tant qu'on n'y est pas allé. */
-  const lastBrowsed = useRef<number | null>(null);
+  /** Dernière pochette regardée dans chaque bac ; null tant qu'on n'y est pas allé. */
+  const lastBrowsed = useRef<Record<LibraryTab, number | null>>({ albums: null, playlists: null });
 
   /**
    * La source vaut pour la bibliothèque, la recherche ET la file : on la
@@ -427,41 +488,92 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     if (!client) return null;
     librarySource.current =
       librarySource.current ??
-      (DEMO ? demoLibrary(client, entityId) : haLibrary(client as never, entityId));
+      (DEMO
+        ? demoLibrary(client, entityId)
+        : haLibrary(client as never, entityId, massRef.current));
     return librarySource.current;
   }, [entityId]);
 
   // Changer d'enceinte invalide la source : la file appartient au lecteur.
   useEffect(() => {
     librarySource.current = null;
-    setQueueItems([]);
+    setQueue(EMPTY_QUEUE);
   }, [entityId]);
 
-  /** Va chercher la bibliothèque, une seule fois, quel que soit le déclencheur. */
-  const loadLibrary = useCallback(async () => {
-    if (albums.length > 0 || libraryLoading) return;
+  /**
+   * Va chercher un bac, une seule fois, quel que soit le déclencheur. Albums et
+   * playlists ont chacun le leur : on ne paie que celui qu'on ouvre.
+   */
+  const loading = useRef<Set<LibraryTab>>(new Set());
+  const loadLibrary = useCallback(
+    async (tab: LibraryTab) => {
+      const deja = tab === "albums" ? albums.length > 0 : playlists.length > 0;
+      if (deja || loading.current.has(tab)) return;
 
-    // Le mode démonstration lit la pochette générée ; sinon on interroge
-    // Music Assistant à travers Home Assistant.
-    if (!source()) return;
+      // Le mode démonstration lit des pochettes générées ; sinon on interroge
+      // Music Assistant à travers Home Assistant.
+      const lib = source();
+      if (!lib) return;
 
-    setLibraryLoading(true);
-    setLibraryError(null);
-    try {
-      setAlbums(await librarySource.current!.albums());
-    } catch (err) {
-      setLibraryError(
-        `Impossible de lire la bibliothèque : ${err instanceof Error ? err.message : String(err)}`,
-      );
-    } finally {
-      setLibraryLoading(false);
-    }
-  }, [albums.length, libraryLoading, source]);
+      loading.current.add(tab);
+      setLibraryLoading(true);
+      setLibraryError(null);
+      try {
+        if (tab === "albums") setAlbums(await lib.albums());
+        else setPlaylists(await lib.playlists());
+      } catch (err) {
+        setLibraryError(
+          `Impossible de lire la bibliothèque : ${err instanceof Error ? err.message : String(err)}`,
+        );
+      } finally {
+        loading.current.delete(tab);
+        setLibraryLoading(loading.current.size > 0);
+      }
+    },
+    [albums.length, playlists.length, source],
+  );
 
   const openLibrary = useCallback(() => {
+    // Les volets passent AU-DESSUS du bac : laissés ouverts, la file masquait
+    // le bord droit de la bibliothèque.
+    setShowQueue(false);
+    setShowSpeakers(false);
+    setShowLyrics(false);
     setShowLibrary(true);
-    void loadLibrary();
-  }, [loadLibrary]);
+    void loadLibrary(libraryTab);
+  }, [libraryTab, loadLibrary]);
+
+  const chooseTab = useCallback(
+    (tab: LibraryTab) => {
+      setLibraryTab(tab);
+      void loadLibrary(tab);
+    },
+    [loadLibrary],
+  );
+
+  /*
+   * Ce que montre le bac, et où l'on s'y trouve. Tous deux sont STABLES d'un
+   * rendu à l'autre : l'app se redessine à chaque seconde de lecture, et un
+   * tableau ou un rappel neuf à chaque fois relançait la boucle du bac.
+   */
+  const crateItems = useMemo(
+    () =>
+      results
+        ? libraryTab === "albums"
+          ? [...results.albums, ...results.tracks]
+          : results.playlists
+        : libraryTab === "albums"
+          ? albums
+          : playlists,
+    [albums, libraryTab, playlists, results],
+  );
+  const favorite = useMemo(() => playlists.find((p) => p.pinned) ?? null, [playlists]);
+  const browsing = useRef({ tab: libraryTab, searching: false });
+  browsing.current = { tab: libraryTab, searching: results !== null };
+  const onBrowse = useCallback((index: number) => {
+    // Un résultat de recherche ne remplace pas la place retenue dans le bac.
+    if (!browsing.current.searching) lastBrowsed.current[browsing.current.tab] = index;
+  }, []);
 
   /*
    * La bibliothèque part en fond dès que la platine est en place.
@@ -482,7 +594,10 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     if (DEMO || prefetched.current || !entity) return;
     prefetched.current = true;
 
-    const lancer = () => void loadLibrary();
+    const lancer = () => {
+      void loadLibrary("albums");
+      void loadLibrary("playlists");
+    };
     // requestIdleCallback n'est arrivé qu'avec Safari 17 : l'iPad peut être plus
     // ancien, d'où le repli sur un simple délai.
     const auRepos = typeof window.requestIdleCallback === "function";
@@ -517,14 +632,13 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
       if (!lib) return;
       try {
         const trouve = await lib.search(texte);
-        // Albums d'abord, puis les morceaux : on cherche un disque à poser.
-        if (vivant) setResults([...trouve.albums, ...trouve.tracks]);
+        if (vivant) setResults(trouve);
       } catch (err) {
         if (vivant) {
           setLibraryError(
             `Recherche impossible : ${err instanceof Error ? err.message : String(err)}`,
           );
-          setResults([]);
+          setResults({ albums: [], playlists: [], tracks: [] });
         }
       } finally {
         if (vivant) setSearching(false);
@@ -539,28 +653,106 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
   // ------------------------------------------------------------- file d'attente
 
+  /**
+   * Instant de la dernière modification faite ICI (déplacement). Une lecture
+   * partie avant elle rapporterait l'ordre d'avant : on la jette, sans quoi la
+   * ligne qu'on vient de poser sauterait un instant à son ancienne place.
+   */
+  const localEdit = useRef(0);
+  const queueSeq = useRef(0);
+  /**
+   * Une ligne est tenue au doigt. Relire la file à ce moment-là pouvait la
+   * réordonner SOUS le doigt — un morceau qui change, une modification faite
+   * ailleurs — et le lâcher aurait alors déplacé le mauvais morceau. On diffère
+   * donc toute relecture jusqu'au lâcher.
+   */
+  const sorting = useRef(false);
+  const refreshAfterSort = useRef(false);
+
   const refreshQueue = useCallback(async () => {
     const lib = source();
     if (!lib) return;
+    if (sorting.current) {
+      refreshAfterSort.current = true;
+      return;
+    }
+    const seq = ++queueSeq.current;
+    const depart = performance.now();
     setQueueLoading(true);
     setQueueError(null);
     try {
       const vue = await lib.queue();
-      setQueueItems(vue.items);
-      setQueueCurrent(vue.current);
+      // Seule la lecture la plus récente fait foi, et jamais pendant un geste.
+      if (seq !== queueSeq.current || depart < localEdit.current) return;
+      if (sorting.current) {
+        refreshAfterSort.current = true;
+        return;
+      }
+      setQueue(vue);
     } catch (err) {
       setQueueError(
         `Impossible de lire la file : ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
-      setQueueLoading(false);
+      if (seq === queueSeq.current) setQueueLoading(false);
     }
   }, [source]);
 
   // La file suit le morceau : elle se relit quand la platine change de titre.
   useEffect(() => {
+    // Volet fermé en pleine prise : le lâcher n'arrivera jamais.
+    if (!showQueue) sorting.current = false;
     if (showQueue) void refreshQueue();
   }, [showQueue, title, refreshQueue]);
+
+  /*
+   * Et, quand Music Assistant est joint en direct, elle se relit dès qu'il
+   * annonce un changement : lancer un album remplit la liste sous nos yeux, un
+   * déplacement fait depuis un autre appareil s'y voit aussi.
+   */
+  useEffect(() => {
+    if (!showQueue) return;
+    const lib = source();
+    if (!lib) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = lib.watchQueue(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void refreshQueue(), 180);
+    });
+    return () => {
+      off();
+      clearTimeout(timer);
+    };
+  }, [showQueue, refreshQueue, source]);
+
+  /**
+   * Déplacer un morceau. La liste bouge tout de suite, sans attendre Music
+   * Assistant ; s'il refuse, on relit la vérité.
+   */
+  const moveInQueue = useCallback(
+    async (from: number, to: number) => {
+      const lib = source();
+      const item = queue.items[from];
+      if (!lib || !item || from === to) return;
+      localEdit.current = performance.now();
+      setQueue((q) => {
+        const items = [...q.items];
+        const [pris] = items.splice(from, 1);
+        items.splice(to, 0, pris!);
+        return { ...q, items };
+      });
+      try {
+        await lib.move(item, to - from);
+      } catch (err) {
+        setQueueError(
+          `Déplacement refusé : ${err instanceof Error ? err.message : String(err)}`,
+        );
+        localEdit.current = 0;
+        void refreshQueue();
+      }
+    },
+    [queue.items, refreshQueue, source],
+  );
 
   /**
    * Le morceau visé par le saut, gardé le temps que la file l'annonce.
@@ -578,9 +770,9 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
   useEffect(() => {
     if (queuePending === null) return;
-    const enCours = queueItems[queueCurrent];
+    const enCours = queue.items[queue.current];
     if (enCours && enCours.uri === jumpUri.current) setQueuePending(null);
-  }, [queueItems, queueCurrent, queuePending]);
+  }, [queue, queuePending]);
 
   // Filet : si la file ne confirme jamais, la marque ne doit pas rester à vie.
   useEffect(() => {
@@ -691,12 +883,22 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
    * pochette visible d'un bout à l'autre — et masque au passage le temps de
    * réponse de Home Assistant, puisque le disque n'apparaît qu'à l'atterrissage.
    */
-  const playAlbum = useCallback((album: Album, from: HTMLElement) => {
+  const playMedia = useCallback((album: Media, from: HTMLElement) => {
     void librarySource.current?.play(album);
 
     const crate = from.parentElement;
-    const sleeve = document.querySelector<HTMLElement>(".sleeve");
-    const panel = document.querySelector<HTMLElement>(".library");
+    /*
+     * Les éléments se cherchent dans NOTRE racine, jamais dans `document`.
+     *
+     * Dans le panneau, l'app vit dans un shadow DOM que document.querySelector
+     * ne traverse pas : il rendait null pour la pochette, et le vol vers la
+     * platine n'a jamais eu lieu dans Home Assistant — le bac se fermait sec.
+     * Seule la page autonome montrait l'animation.
+     */
+    const trouver = (selecteur: string) =>
+      rootRef.current?.querySelector<HTMLElement>(selecteur) ?? null;
+    const sleeve = trouver(".sleeve");
+    const panel = trouver(".library");
 
     if (!crate || !sleeve) {
       setShowLibrary(false);
@@ -704,7 +906,9 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     }
 
     const target = sleeve.getBoundingClientRect();
-    const size = from.offsetWidth;
+    // Depuis un bouton, la pochette naît à la taille d'une vignette ; depuis le
+    // bac, à celle de la pochette touchée.
+    const size = from.dataset.i === undefined ? Math.max(from.offsetHeight, 48) : from.offsetWidth;
 
     /*
      * La copie doit partir de LÀ OÙ L'ALBUM SE TROUVE À L'ÉCRAN.
@@ -721,7 +925,9 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     // sa position dans une propriété CSS, qui coûtait un recalcul par image.
     const offset = parseFloat(crate.dataset.offset ?? "") || 0;
     const index = parseFloat(from.dataset.i ?? "") || 0;
-    const tilt = `${90 + (index - offset) * arc}deg`;
+    // Parti d'ailleurs que du bac (le raccourci des coups de cœur) : la
+    // pochette décolle à plat, elle n'a pas d'angle de roue à reprendre.
+    const tilt = from.dataset.i === undefined ? "0deg" : `${90 + (index - offset) * arc}deg`;
 
     // La copie est un carré à la taille de la pochette, centré sur elle.
     const left = box.left + box.width / 2 - size / 2;
@@ -769,9 +975,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
      * par-dessus, ce qui est aussi le bon ordre des gestes.
      */
     const hide = (selector: string, delay: number) =>
-      document
-        .querySelector<HTMLElement>(selector)
-        ?.animate([{ opacity: 1 }, { opacity: 0 }], {
+      trouver(selector)?.animate([{ opacity: 1 }, { opacity: 0 }], {
           duration: 260,
           delay,
           easing: "ease-out",
@@ -806,7 +1010,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
       // Le disque n'entre en scène qu'une fois la pochette posée : il glisse de
       // derrière la pochette, comme on sort un vinyle de son sillon.
-      document.querySelector<HTMLElement>(".disc")?.animate(
+      trouver(".disc")?.animate(
         [
           { opacity: 0, transform: "translateY(-50%) translateX(-14%) scale(0.94)" },
           { opacity: 1, transform: "translateY(-50%) translateX(0) scale(1)" },
@@ -814,9 +1018,11 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
         { duration: 700, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
       );
       for (const selector of [".tonearm", ".tonearm-base"]) {
-        document
-          .querySelector<HTMLElement>(selector)
-          ?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 520, delay: 180, easing: "ease-out" });
+        trouver(selector)?.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: 520,
+          delay: 180,
+          easing: "ease-out",
+        });
       }
 
       flyer.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 220, delay: 120, fill: "forwards" })
@@ -829,7 +1035,9 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
   // ?demo=1&lib=1 pour ouvrir directement le bac à disques.
   useEffect(() => {
-    if (DEMO && new URLSearchParams(window.location.search).has("lib")) openLibrary();
+    const demande = new URLSearchParams(window.location.search);
+    if (DEMO && (demande.has("lib") || demande.has("playlists"))) openLibrary();
+    if (DEMO && demande.has("queue")) setShowQueue(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1000,7 +1208,10 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
       data-bg={look.background}
       data-panel={panelOuvert}
     >
-      <div className="backdrop" />
+      <div className="backdrop">
+        {/* Uniquement pour le fond adaptatif : les autres sont des aplats voulus. */}
+        {look.background === "adaptive" && <Ambient image={coverUrl} className="backdrop__art" />}
+      </div>
 
       <div className="stage">
         <Turntable
@@ -1091,12 +1302,24 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
       {showQueue && (
         <Queue
-          items={queueItems}
+          items={queue.items}
           loading={queueLoading}
           error={queueError}
-          current={queueCurrent}
+          current={queue.current}
+          locked={queue.locked}
+          full={queue.full}
+          total={queue.total}
+          note={queue.note}
           pending={queuePending}
           onPick={(item) => void jumpTo(item)}
+          onMove={(from, to) => void moveInQueue(from, to)}
+          onSorting={(active) => {
+            sorting.current = active;
+            if (!active && refreshAfterSort.current) {
+              refreshAfterSort.current = false;
+              void refreshQueue();
+            }
+          }}
           onClose={() => setShowQueue(false)}
         />
       )}
@@ -1116,14 +1339,18 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
       {showLibrary && (
         <Library
           /* Un résultat de recherche remplace le bac ; sans recherche, la
-             bibliothèque entière. */
-          albums={results ?? albums}
+             bibliothèque entière. Les albums trouvés passent avant les
+             morceaux : on cherche d'abord un disque à poser. */
+          items={crateItems}
+          tab={libraryTab}
+          onTab={chooseTab}
+          favorite={favorite}
           loading={libraryLoading}
           error={libraryError}
-          onPlay={playAlbum}
+          onPlay={playMedia}
           onClose={() => setShowLibrary(false)}
-          resumeIndex={lastBrowsed.current}
-          onFocusChange={(index) => (lastBrowsed.current = index)}
+          resumeIndex={results ? null : lastBrowsed.current[libraryTab]}
+          onFocusChange={onBrowse}
           query={query}
           onQuery={setQuery}
           searching={searching}
