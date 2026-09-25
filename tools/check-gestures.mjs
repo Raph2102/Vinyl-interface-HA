@@ -149,9 +149,21 @@ async function evaluate(expression) {
 
 await send("Runtime.enable");
 await send("Page.enable");
+/*
+ * La page doit se croire au premier plan.
+ *
+ * Sans navigateur visible, il arrive qu'Edge déclare l'onglet caché : il
+ * suspend alors requestAnimationFrame, et tout ce qu'écrit la boucle
+ * d'affichage — bras, compteur — reste figé. Le contrôle « le bras déplace la
+ * lecture » lisait ainsi 0:00 avant et après le geste, alors que l'app avait
+ * bel et bien déplacé la lecture. Relevé en instrumentant : visibilityState
+ * valait « hidden » au moment de la lecture.
+ */
+await send("Emulation.setFocusEmulationEnabled", { enabled: true });
 
 async function open(path, settings) {
   await send("Page.navigate", { url: `${BASE}/${path}` });
+  await send("Page.bringToFront");
   await sleep(600);
   if (settings) {
     await evaluate(`localStorage.setItem("mdvinyl.settings.v1", ${JSON.stringify(JSON.stringify(settings))})`);
@@ -223,6 +235,22 @@ const lift = () =>
   );
 
 const elapsed = () => evaluate(`document.querySelector(".times span").textContent`);
+
+/*
+ * Le compteur est écrit par la boucle d'affichage, pas par React : juste après
+ * un chargement il peut encore valoir « 0:00 », et juste après un geste il
+ * peut n'avoir pas encore suivi. Le lire d'un coup rendait ce contrôle
+ * capricieux — il échouait sans que l'app soit en cause (rejoué pas à pas, le
+ * bras déplaçait bien la lecture). On attend donc qu'il se pose.
+ */
+async function elapsedSettled(differentFrom = null) {
+  let value = await elapsed();
+  for (let i = 0; i < 25 && (value === "0:00" || value === differentFrom); i++) {
+    await sleep(120);
+    value = await elapsed();
+  }
+  return value;
+}
 const title = () => evaluate(`document.querySelector(".track__title").textContent`);
 
 // ---------------------------------------------------------------- 1. aiguille
@@ -286,7 +314,7 @@ await open("?demo=1&paused=1", {
 const hasPlayButton = await evaluate(`!!document.querySelector(".iconbtn--play")`);
 check("le bouton lecture est present", hasPlayButton);
 
-const timeBefore = await elapsed();
+const timeBefore = await elapsedSettled();
 const disc2 = await centreOf(".disc");
 await drag(await centreOf(".tonearm__grip"), {
   x: disc2.x + (disc2.w / 2) * 0.5,
@@ -299,7 +327,7 @@ check(
   (await lift()) > 0.8,
   `lift=${(await lift()).toFixed(2)}`,
 );
-const timeAfter = await elapsed();
+const timeAfter = await elapsedSettled(timeBefore);
 check(
   "en mode bouton, le bras deplace bien la lecture",
   timeAfter !== timeBefore,

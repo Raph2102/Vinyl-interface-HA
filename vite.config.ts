@@ -183,6 +183,18 @@ export default defineConfig(({ mode }) => {
     preview: {
       host: true,
       port: 4192,
+      /*
+       * AUCUN relais vers Home Assistant en prévisualisation.
+       *
+       * Vite y reprend par défaut le proxy du serveur de développement. Or la
+       * page construite embarque le jeton de .env, et les tests de bout en bout
+       * tournent sur cette prévisualisation : le jour où la configuration de
+       * test n'a pas été posée à temps, l'app a démarré avec le vrai jeton sur
+       * son origine, et ce relais l'a menée droit au vrai Home Assistant. Le
+       * test a alors lancé de la musique dans la maison. La prévisualisation
+       * sert à voir la page construite, jamais à parler à une installation.
+       */
+      proxy: {},
     },
     server: {
       host: true,

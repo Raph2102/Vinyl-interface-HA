@@ -7,7 +7,10 @@
  *  - ce qu'elle ENVOIE, en relisant le journal du serveur.
  *
  * C'est ce qui permet d'affirmer qu'une fonction marchera contre une vraie
- * installation sans en avoir une sous la main.
+ * installation sans en avoir une sous la main — à condition que le faux parle
+ * comme le vrai. Il ne le faisait pas pour get_queue, et la file vide de
+ * l'utilisateur est passée entre les mailles : ses formes sont désormais
+ * relevées sur une vraie installation.
  *
  * Usage :  node tools/fake-ha.mjs &  puis  node tools/check-ha.mjs <url-app>
  */
@@ -191,27 +194,74 @@ await envoyer("Runtime.enable");
 await envoyer("Page.enable");
 await sleep(700);
 
+/*
+ * GARDE-FOUS — à ne jamais retirer.
+ *
+ * La page construite embarque le vrai jeton de .env. Un jour, les réglages de
+ * test ont été posés AVANT que la page ne soit sur la bonne origine : ils sont
+ * partis ailleurs, l'app a démarré avec le vrai jeton, et le relais de la
+ * prévisualisation l'a menée au vrai Home Assistant. Le test a lancé un album,
+ * réordonné une file et transféré la musique vers une enceinte de la maison,
+ * en pleine nuit.
+ *
+ * Désormais : les réglages ne se posent que sur l'origine de l'app, se relisent,
+ * et AUCUN clic n'a lieu tant qu'on n'a pas prouvé que l'app parle au faux
+ * serveur avec le jeton de test. Au moindre doute, on s'arrête net.
+ */
+const ORIGINE = new URL(APP).origin;
+
+async function poserReglages(reglages) {
+  for (let i = 0; i < 60; i++) {
+    const pret = await evaluer(
+      `location.origin === ${JSON.stringify(ORIGINE)} && document.readyState === "complete"`,
+    );
+    if (pret) break;
+    await sleep(100);
+  }
+  await evaluer(
+    `localStorage.setItem("mdvinyl.settings.v1", ${JSON.stringify(JSON.stringify(reglages))})`,
+  );
+  const relu = (await evaluer(`localStorage.getItem("mdvinyl.settings.v1") ?? ""`)) ?? "";
+  if (!relu.includes('"jeton-de-test"') || !relu.includes(HA)) {
+    console.error(
+      `\nARRÊT : les réglages de test ne sont pas posés (page : ${await evaluer("location.href")}). Aucun clic n'a eu lieu.`,
+    );
+    process.exit(2);
+  }
+}
+
+async function exigerLeFaux() {
+  for (let i = 0; i < 50; i++) {
+    const piece = await evaluer(`document.querySelector(".hud__name")?.textContent ?? null`);
+    const journal = await (await fetch(`${HA}/_journal`)).json();
+    const authentifie = journal.some((m) => m.type === "auth" && m.access_token === "jeton-de-test");
+    if (piece === "Salon" && authentifie) return;
+    // Une autre pièce que celle du faux serveur : l'app parle à autre chose.
+    if (piece && piece !== "Salon" && piece !== "Cuisine" && piece !== "Chambre") break;
+    await sleep(150);
+  }
+  console.error("\nARRÊT : l'app ne parle pas au faux Home Assistant. Aucun clic n'a eu lieu.");
+  process.exit(2);
+}
+
 // --------------------------------------------------- 1. configuration + liaison
 
 console.log("\n-- liaison --");
-await evaluer(
-  `localStorage.setItem("mdvinyl.settings.v1", ${JSON.stringify(
-    JSON.stringify({
-      haUrl: HA,
-      token: "jeton-de-test",
-      entityId: "media_player.salon",
-      vinyl: "black",
-      background: "adaptive",
-      playControl: "arm",
-      lyrics: false,
-      idleMinutes: 0,
-      counterRotateLabel: false,
-      rpm: 33.3333,
-    }),
-  )})`,
-);
+await poserReglages({
+  haUrl: HA,
+  token: "jeton-de-test",
+  entityId: "media_player.salon",
+  vinyl: "black",
+  background: "adaptive",
+  playControl: "arm",
+  lyrics: false,
+  idleMinutes: 0,
+  counterRotateLabel: false,
+  rpm: 33.3333,
+});
 await envoyer("Page.reload");
 await sleep(3200);
+await exigerLeFaux();
 
 const vu = await evaluer(`JSON.stringify({
   titre: document.querySelector(".track__title")?.textContent ?? null,
@@ -306,6 +356,11 @@ verifier(
 );
 verifier("get_library demande bien une réponse", bibliotheque?.return_response === true);
 verifier(
+  "un album remplace la file (enqueue: replace, media_type: album)",
+  lecture?.service_data?.enqueue === "replace" && lecture?.service_data?.media_type === "album",
+  JSON.stringify(lecture?.service_data ?? null),
+);
+verifier(
   "play_media envoie l'URI de l'album et vise l'enceinte",
   lecture?.service_data?.media_id?.startsWith("library://album/") &&
     lecture?.target?.entity_id === "media_player.salon",
@@ -336,35 +391,59 @@ await reveiller();
 // Ciblé par le titre : l'apostrophe de « File d'attente » ne survit pas aux
 // trois niveaux de citation entre ce fichier, CDP et la page.
 await evaluer('document.querySelector(\'[title="À suivre"]\')?.click()');
-await sleep(1500);
+await sleep(1800);
 
-const file = JSON.parse(
-  await evaluer(`JSON.stringify({
-    ouvert: !!document.querySelector(".queue"),
-    erreur: document.querySelector(".queue .sidepanel__error")?.textContent ?? null,
-    titres: [...document.querySelectorAll(".queue__item .sidepanel__text b")].map((e) => e.textContent),
-    artistes: [...document.querySelectorAll(".queue__item .sidepanel__text span")].map((e) => e.textContent),
-    durees: [...document.querySelectorAll(".queue__time")].map((e) => e.textContent),
-    rangCourant: [...document.querySelectorAll(".queue__item")].findIndex((e) => e.dataset.state === "now"),
-    pochettes: [...document.querySelectorAll(".queue__art")].filter((e) => getComputedStyle(e).backgroundImage !== "none").length,
-  })`),
-);
+const lireFile = async () =>
+  JSON.parse(
+    await evaluer(`JSON.stringify({
+      ouvert: !!document.querySelector(".queue"),
+      erreur: document.querySelector(".queue .sidepanel__error")?.textContent ?? null,
+      note: document.querySelector(".queue .sidepanel__note")?.textContent ?? null,
+      entete: document.querySelector(".queue h2 small")?.textContent ?? null,
+      titres: [...document.querySelectorAll(".queue__item .sidepanel__text b")].map((e) => e.textContent),
+      artistes: [...document.querySelectorAll(".queue__item .sidepanel__text span")].map((e) => e.textContent),
+      durees: [...document.querySelectorAll(".queue__time")].map((e) => e.textContent),
+      rangCourant: [...document.querySelectorAll(".queue__item")].findIndex((e) => e.dataset.state === "now"),
+      pochettes: [...document.querySelectorAll(".queue__art")].filter((e) => getComputedStyle(e).backgroundImage !== "none").length,
+      poignees: document.querySelectorAll(".queue__grip").length,
+      mobiles: [...document.querySelectorAll(".queue__item")].map((e) => e.dataset.movable === "true"),
+    })`),
+  );
 
+let file = await lireFile();
+const journalMA = async () => (await (await fetch(`${HA}/_journal_ma`)).json());
+
+/*
+ * LE défaut signalé : « quand je mets un album, il n'y a rien dans la file ».
+ * L'album posé à l'étape précédente doit s'y trouver, en entier.
+ */
 verifier("le volet de file s'ouvre", file.ouvert === true);
 verifier("aucune erreur de file", file.erreur === null, file.erreur ?? "");
-verifier("les morceaux à suivre sont listés", file.titres.length === 6, `${file.titres.length} morceaux`);
+verifier(
+  "l'album qu'on vient de poser remplit la file, en entier",
+  file.titres.length === 8 && (file.titres[0] ?? "").startsWith(attendu ?? "?"),
+  `${file.titres.length} morceaux, premier « ${file.titres[0]} »`,
+);
+verifier(
+  "le titre est celui du morceau, sans l'artiste recollé devant",
+  !(file.titres[0] ?? "").includes(" - "),
+  file.titres[0] ?? "",
+);
 verifier(
   "l'artiste est lu dans media_item.artists[]",
-  file.artistes[0] === "Daft Punk",
+  file.artistes[0] !== "" && file.artistes[0] !== undefined,
   file.artistes.slice(0, 3).join(" / "),
 );
 verifier("la durée de chaque morceau est lue", file.durees[0] === "3:20", file.durees.slice(0, 3).join(" / "));
+verifier("le morceau en cours vient de current_index", file.rangCourant === 0, `rang ${file.rangCourant}`);
+verifier("les pochettes de la file sont résolues", file.pochettes === 8, `${file.pochettes}/8`);
+verifier("l'en-tête compte les titres", (file.entete ?? "").startsWith("8 titres"), file.entete ?? "");
 verifier(
-  "le morceau en cours vient de current_index, pas d'une comparaison de titres",
-  file.rangCourant === 1,
-  `rang ${file.rangCourant}`,
+  "chaque morceau à venir a sa poignée, pas celui en cours",
+  file.poignees === 7 && file.mobiles[0] === false,
+  `${file.poignees} poignée(s)`,
 );
-verifier("les pochettes de la file sont résolues", file.pochettes === 6, `${file.pochettes}/6`);
+verifier("pas d'avertissement quand la file est complète", file.note === null, file.note ?? "");
 
 let recent = await journalDepuis();
 const appelFile = recent.find((m) => m.service === "get_queue");
@@ -374,16 +453,24 @@ verifier(
     appelFile?.service_data?.config_entry_id === undefined,
   JSON.stringify({ target: appelFile?.target, data: appelFile?.service_data }),
 );
-verifier("get_queue demande bien une réponse", appelFile?.return_response === true);
+
+const toutHA = await (await fetch(`${HA}/_journal`)).json();
+const superviseur = toutHA.filter((m) => m.type === "supervisor/api").map((m) => `${m.method} ${m.endpoint}`);
+verifier(
+  "la liaison Music Assistant passe par le superviseur et une session d'ingress",
+  superviseur.includes("get /addons") && superviseur.some((e) => e.includes("/ingress/")),
+  superviseur.join(", "),
+);
+let ma = await journalMA();
+verifier(
+  "la file complète est lue chez Music Assistant, par l'identifiant que donne get_queue",
+  ma.some((m) => m.command === "player_queues/items" && m.args?.queue_id === "salon_file"),
+  ma.map((m) => m.command).join(", "),
+);
 
 /*
- * Sauter sur une piste de la file. On vise la quatrième ligne : elle est après
- * le morceau en cours, ce qui est le geste courant — « passer à celle-là ».
- */
-/*
- * Le marquage optimiste se lit DANS LA FOULÉE du clic : il ne dure que jusqu'au
- * retour de Home Assistant, qui arrive ici en quelques dizaines de millisecondes.
- * Attendre une demi-seconde revenait à mesurer l'état d'après.
+ * Sauter sur une piste. Par Music Assistant, c'est play_index sur la ligne
+ * touchée : l'ancien chemin (play_media « play ») insérait une COPIE du morceau.
  */
 const vise = JSON.parse(
   await evaluer(`(async () => {
@@ -391,8 +478,7 @@ const vise = JSON.parse(
     const cible = lignes[3];
     const titre = cible.querySelector("b").textContent;
     // Le DOM n'est pas à jour au retour de click() : React peint au tour
-    // suivant. On laisse passer deux images, ce qui reste bien en deçà de la
-    // durée plancher de la marque.
+    // suivant. On laisse passer deux images, bien en deçà de la durée de la marque.
     cible.click();
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const lignesApres = [...document.querySelectorAll(".queue__item")];
@@ -403,51 +489,166 @@ const vise = JSON.parse(
     });
   })()`),
 );
-
 verifier(
   "la ligne touchée est marquée aussitôt, sans attendre le retour",
   vise.marquees === 1 && vise.rangMarque === 3,
   `rang ${vise.rangMarque}, ${vise.marquees} marquée(s)`,
 );
 
-await sleep(1600);
-recent = await journalDepuis();
-const saut = recent.find((m) => m.service === "play_media");
-verifier(
-  "le saut envoie l'URI du morceau, en conservant la file",
-  saut?.service_data?.media_type === "track" &&
-    saut?.service_data?.enqueue === "play" &&
-    typeof saut?.service_data?.media_id === "string" &&
-    saut?.target?.entity_id === "media_player.salon",
-  JSON.stringify({ data: saut?.service_data, target: saut?.target }),
+await sleep(400);
+ma = await journalMA();
+const saut = ma.find((m) => m.command === "player_queues/play_index");
+const idsAvant = JSON.parse(
+  await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item")].map((e) => e.querySelector("b").textContent))`),
 );
-/*
- * Le point qui coinçait : une fois la commande partie, Home Assistant confirme
- * bien avant que Music Assistant n'ait recalé sa file. Si on relâche la marque
- * à ce moment-là, la pastille repart une fraction de seconde sur le morceau
- * PRÉCÉDENT. On vérifie donc qu'elle reste sur la ligne choisie tout du long.
- */
+verifier(
+  "le saut joue la ligne elle-même (play_index), sans insérer de copie",
+  saut?.args?.queue_id === "salon_file" && typeof saut?.args?.index === "string",
+  JSON.stringify(saut?.args ?? null),
+);
+recent = await journalDepuis();
+verifier(
+  "aucun play_media « play » n'est envoyé quand Music Assistant est joint",
+  !recent.some((m) => m.service === "play_media"),
+  recent.map((m) => m.service).join(", "),
+);
+
+// Home Assistant confirme bien avant que Music Assistant n'ait recalé sa file :
+// la pastille ne doit jamais revenir sur l'ancienne ligne entre-temps.
 const suivi = [];
 for (let i = 0; i < 10; i++) {
   suivi.push(
-    await evaluer(
-      `[...document.querySelectorAll(".queue__item")].findIndex((e) => e.dataset.state === "now")`,
-    ),
+    await evaluer(`[...document.querySelectorAll(".queue__item")].findIndex((e) => e.dataset.state === "now")`),
   );
   await sleep(220);
 }
-verifier(
-  "la pastille ne revient jamais sur le morceau précédent",
-  suivi.every((r) => r === 3),
-  `rangs observés : ${suivi.join(",")}`,
-);
-
+verifier("la pastille ne revient jamais sur le morceau précédent", suivi.every((r) => r === 3), `rangs observés : ${suivi.join(",")}`);
 verifier(
   "la platine joue bien le morceau demandé",
-  (await evaluer(`document.querySelector(".track__title")?.textContent`))?.startsWith(
-    vise.titre.split(" — ")[0],
-  ),
+  (await evaluer(`document.querySelector(".track__title")?.textContent`)) === vise.titre,
   `demandé « ${vise.titre} »`,
+);
+file = await lireFile();
+verifier("la file garde sa longueur après un saut", file.titres.length === 8, `${file.titres.length} morceaux`);
+verifier(
+  "rien ne se déplace avant le morceau en cours",
+  file.poignees === 4 && file.mobiles.slice(0, 4).every((m) => m === false),
+  `${file.poignees} poignée(s)`,
+);
+
+// ------------------------------------------------ 4 bis. réordonner au doigt
+
+console.log("\n-- réordonner la file --");
+
+/** Glisse depuis (x, y) de dy pixels, par la souris du protocole DevTools. */
+async function glisser(x, y, dy, attente = 0) {
+  const souris = (type, yy, buttons) =>
+    envoyer("Input.dispatchMouseEvent", { type, x, y: yy, button: "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+  await souris("mousePressed", y, 1);
+  if (attente) await sleep(attente);
+  for (let k = 1; k <= 10; k++) {
+    await souris("mouseMoved", y + (dy * k) / 10, 1);
+    await sleep(25);
+  }
+  await sleep(120);
+  await souris("mouseReleased", y + dy, 0);
+}
+
+const geometrie = JSON.parse(
+  await evaluer(`(() => {
+    const lignes = [...document.querySelectorAll(".queue__item")];
+    const a = lignes[4].getBoundingClientRect();
+    const b = lignes[5].getBoundingClientRect();
+    const poignee = lignes[5].querySelector(".queue__grip").getBoundingClientRect();
+    const corps = lignes[6].querySelector(".queue__pick").getBoundingClientRect();
+    return JSON.stringify({
+      pas: b.top - a.top,
+      px: poignee.left + poignee.width / 2, py: poignee.top + poignee.height / 2,
+      cx: corps.left + corps.width / 3, cy: corps.top + corps.height / 2,
+    });
+  })()`),
+);
+
+// La poignée de la ligne 5, deux lignes plus bas.
+await glisser(geometrie.px, geometrie.py, geometrie.pas * 2);
+await sleep(500);
+let ordre = JSON.parse(
+  await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item b")].map((e) => e.textContent))`),
+);
+ma = await journalMA();
+const deplacement = ma.filter((m) => m.command === "player_queues/move_item").pop();
+verifier(
+  "la poignée déplace le morceau là où on le lâche",
+  ordre[7] === idsAvant[5] && ordre[5] === idsAvant[6],
+  `ligne 7 : « ${ordre[7]} »`,
+);
+verifier(
+  "Music Assistant reçoit move_item avec le bon décalage",
+  deplacement?.args?.pos_shift === 2 && typeof deplacement?.args?.queue_item_id === "string",
+  JSON.stringify(deplacement?.args ?? null),
+);
+await sleep(900);
+const ordreServeur = JSON.parse(
+  await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item b")].map((e) => e.textContent))`),
+);
+verifier(
+  "après relecture, l'ordre est celui que Music Assistant a enregistré",
+  ordreServeur.join("|") === ordre.join("|"),
+);
+
+// Appui long sur le corps de la ligne 6, une ligne plus haut.
+const avantAppui = ordreServeur;
+await glisser(geometrie.cx, geometrie.cy, -geometrie.pas, 520);
+await sleep(700);
+ordre = JSON.parse(
+  await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item b")].map((e) => e.textContent))`),
+);
+ma = await journalMA();
+verifier(
+  "un appui long sur la ligne la prend aussi",
+  ordre[5] === avantAppui[6] && ma.filter((m) => m.command === "player_queues/move_item").pop()?.args?.pos_shift === -1,
+  `ligne 5 : « ${ordre[5]} »`,
+);
+verifier(
+  "l'appui long ne saute pas sur le morceau",
+  ma.filter((m) => m.command === "player_queues/play_index").length === 1,
+);
+
+// Un geste bref sur le corps de ligne n'est PAS une prise : il doit défiler
+// ou sauter, jamais déplacer.
+const mouvementsAvant = ma.filter((m) => m.command === "player_queues/move_item").length;
+await glisser(geometrie.cx, geometrie.cy, geometrie.pas * 2, 0);
+await sleep(500);
+ma = await journalMA();
+verifier(
+  "un glissé sans appui long ne déplace rien",
+  ma.filter((m) => m.command === "player_queues/move_item").length === mouvementsAvant,
+);
+
+// Au clavier : les flèches sur la poignée.
+await evaluer(`(() => {
+  const g = [...document.querySelectorAll(".queue__grip")].pop();
+  g.focus();
+  g.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+})()`);
+await sleep(500);
+ma = await journalMA();
+verifier(
+  "la flèche du haut sur une poignée remonte le morceau d'un rang",
+  ma.filter((m) => m.command === "player_queues/move_item").pop()?.args?.pos_shift === -1 &&
+    ma.filter((m) => m.command === "player_queues/move_item").length === mouvementsAvant + 1,
+);
+
+// Un autre appareil réordonne : l'app ne l'apprend que par les événements.
+const apresAutre = await (await fetch(`${HA}/_bouger?de=7&vers=4`)).json();
+await sleep(1000);
+ordre = JSON.parse(
+  await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item b")].map((e) => e.textContent))`),
+);
+verifier(
+  "un changement fait ailleurs s'affiche tout seul, par les événements de Music Assistant",
+  ordre.join("|") === apresAutre.join("|"),
+  `ligne 4 : « ${ordre[4]} »`,
 );
 
 await evaluer("document.querySelector('[aria-label=\"Fermer la file\"]')?.click()");
@@ -513,6 +714,93 @@ verifier(
 
 await evaluer("document.querySelector('[aria-label=\"Retour à la platine\"]')?.click()");
 await sleep(600);
+
+// --------------------------------------------------- 5 bis. playlists
+
+console.log("\n-- playlists --");
+await reveiller();
+await evaluer("document.querySelector('[aria-label=\"Bibliothèque\"]')?.click()");
+await sleep(1200);
+await evaluer(`[...document.querySelectorAll(".library__tabs button")].find((b) => b.textContent === "Playlists")?.click()`);
+await sleep(1500);
+
+const bac = JSON.parse(
+  await evaluer(`JSON.stringify({
+    compte: document.querySelector(".library__count")?.textContent ?? null,
+    raccourci: document.querySelector(".library__fav span")?.textContent ?? null,
+    legende: document.querySelector(".library__caption b")?.textContent ?? null,
+    // Dans l'ordre du bac, pas dans l'ordre du DOM.
+    noms: [...document.querySelectorAll(".crate__item")]
+      .sort((a, b) => a.dataset.i - b.dataset.i)
+      .map((e) => e.querySelector(".crate__label b").textContent),
+    images: Object.fromEntries([...document.querySelectorAll(".crate__item")].map((e) => [
+      e.querySelector(".crate__label b").textContent,
+      e.querySelector(".crate__face--front img")?.getAttribute("src")?.slice(0, 40) ?? null,
+    ])),
+  })`),
+);
+
+verifier("l'onglet Playlists montre les playlists", (bac.compte ?? "").startsWith("7 playlist"), bac.compte ?? "");
+verifier(
+  "les coups de cœur passent en tête, celle du fournisseur d'abord",
+  bac.noms[0] === "Coups de cœur" && bac.noms[1] === "Tous mes favoris",
+  bac.noms.slice(0, 3).join(" / "),
+);
+verifier(
+  "les playlists générées par Music Assistant portent un nom français",
+  bac.noms.includes("Un album au hasard") && !bac.noms.some((n) => /favorited|Random/.test(n)),
+  bac.noms.join(" / "),
+);
+verifier(
+  "l'image de remplacement partagée est remplacée par une pochette dessinée",
+  (bac.images["Tous mes favoris"] ?? "").startsWith("data:image") &&
+    (bac.images["Écoutés récemment"] ?? "").startsWith("data:image"),
+  JSON.stringify(bac.images["Tous mes favoris"]),
+);
+verifier(
+  "une vraie pochette de fournisseur est gardée",
+  (bac.images["Route de nuit"] ?? "").startsWith("https://cdn.example/"),
+  JSON.stringify(bac.images["Route de nuit"]),
+);
+verifier(
+  "le bac des playlists s'ouvre en son milieu, pas là où l'on avait laissé les albums",
+  bac.legende === bac.noms[3],
+  `au centre : « ${bac.legende} »`,
+);
+verifier("le raccourci des coups de cœur est dans l'en-tête", bac.raccourci === "Coups de cœur", bac.raccourci ?? "");
+
+recent = await journalDepuis();
+verifier(
+  "get_library demande les playlists",
+  recent.some((m) => m.service === "get_library" && m.service_data?.media_type === "playlist") ||
+    (await (await fetch(`${HA}/_journal`)).json()).some(
+      (m) => m.service === "get_library" && m.service_data?.media_type === "playlist",
+    ),
+);
+
+await evaluer(`document.querySelector(".library__fav")?.click()`);
+await sleep(1600);
+recent = await journalDepuis();
+const lecturePlaylist = recent.find((m) => m.service === "play_media");
+verifier(
+  "le raccourci lance la playlist entière, qui remplace la file",
+  lecturePlaylist?.service_data?.media_type === "playlist" &&
+    lecturePlaylist?.service_data?.enqueue === "replace" &&
+    lecturePlaylist?.service_data?.media_id === "library://playlist/1",
+  JSON.stringify(lecturePlaylist?.service_data ?? null),
+);
+
+await reveiller();
+await evaluer('document.querySelector(\'[title="À suivre"]\')?.click()');
+await sleep(1500);
+const filePlaylist = await lireFile();
+verifier(
+  "la file contient les morceaux de la playlist",
+  filePlaylist.titres.length === 8 && (filePlaylist.titres[0] ?? "").startsWith("Coups de cœur"),
+  `${filePlaylist.titres.length} morceaux, premier « ${filePlaylist.titres[0]} »`,
+);
+await evaluer("document.querySelector('[aria-label=\"Fermer la file\"]')?.click()");
+await sleep(400);
 
 // --------------------------------------------------- 6. enceintes et transfert
 
@@ -607,9 +895,8 @@ await sleep(600);
 
 console.log("\n-- déclencheurs de la maison --");
 await fetch(`${HA}/_reset`);
-await evaluer(
-  `localStorage.setItem("mdvinyl.settings.v1", ${JSON.stringify(
-    JSON.stringify({
+await poserReglages(
+  ({
       haUrl: HA,
       token: "jeton-de-test",
       entityId: "media_player.salon",
@@ -623,10 +910,10 @@ await evaluer(
       onPlay: { service: "scene.turn_on", entityId: "scene.ecoute_du_soir" },
       onStop: { service: "light.turn_on", entityId: "light.salon" },
     }),
-  )})`,
 );
 await envoyer("Page.reload");
 await sleep(3200);
+await exigerLeFaux();
 
 const gestesMaison = async () =>
   (await (await fetch(`${HA}/_journal`)).json()).filter(
@@ -669,6 +956,87 @@ verifier(
   "un seul appel par changement d'état, malgré les mises à jour de position",
   maison.length === 2,
   `${maison.length} appel(s) pour 2 changements`,
+);
+
+// --------------------------------------------------- 8. paroles exactes
+
+console.log("\n-- paroles --");
+await fetch(`${HA}/_reset`);
+await poserReglages(
+  ({
+      haUrl: HA,
+      token: "jeton-de-test",
+      entityId: "media_player.salon",
+      vinyl: "black",
+      background: "adaptive",
+      playControl: "arm",
+      lyrics: true,
+      idleMinutes: 0,
+      rpm: 33.3333,
+    }),
+);
+await envoyer("Page.reload");
+await sleep(3500);
+await exigerLeFaux();
+await reveiller();
+await evaluer(`document.querySelector('[aria-label="Paroles"]')?.click()`);
+await sleep(1200);
+const paroles = await evaluer(
+  `[...document.querySelectorAll(".lyrics__line, .lyrics p, .lyrics li")].map((e) => e.textContent).join(" | ")`,
+);
+verifier(
+  "les paroles que Music Assistant tient du fournisseur passent avant LRCLIB",
+  (paroles ?? "").includes("Ligne exacte venue de Music Assistant"),
+  (paroles ?? "").slice(0, 80),
+);
+
+// --------------------------------------------------- 9. sans superviseur
+
+console.log("\n-- sans superviseur (installation Docker) --");
+await fetch(`${HA}/_reset?superviseur=0`);
+await poserReglages(
+  ({
+      haUrl: HA,
+      token: "jeton-de-test",
+      entityId: "media_player.salon",
+      vinyl: "black",
+      background: "adaptive",
+      playControl: "arm",
+      lyrics: false,
+      idleMinutes: 0,
+      rpm: 33.3333,
+    }),
+);
+await envoyer("Page.reload");
+await sleep(3200);
+await exigerLeFaux();
+lu = (await (await fetch(`${HA}/_journal`)).json()).length;
+await reveiller();
+await evaluer('document.querySelector(\'[title="À suivre"]\')?.click()');
+await sleep(1600);
+const apercu = await lireFile();
+verifier("la file s'ouvre sans erreur", apercu.ouvert && apercu.erreur === null, apercu.erreur ?? "");
+verifier(
+  "à défaut de liste complète, on voit au moins le morceau en cours et le suivant",
+  apercu.titres.length === 2 && apercu.titres[0] === "Instant Crush" && apercu.rangCourant === 0,
+  apercu.titres.join(" / "),
+);
+verifier("et on dit pourquoi", (apercu.note ?? "").length > 20, apercu.note ?? "");
+verifier("rien ne se propose au déplacement", apercu.poignees === 0);
+verifier("l'en-tête compte toute la file, pas seulement l'aperçu", (apercu.entete ?? "").startsWith("12 titres"), apercu.entete ?? "");
+
+await evaluer(`[...document.querySelectorAll(".queue__pick")][1]?.click()`);
+await sleep(900);
+recent = await journalDepuis();
+const repli = recent.find((m) => m.service === "play_media");
+verifier(
+  "le saut se replie sur play_media quand Music Assistant n'est pas joignable",
+  repli?.service_data?.enqueue === "play" && repli?.service_data?.media_type === "track",
+  JSON.stringify(repli?.service_data ?? null),
+);
+verifier(
+  "le faux Music Assistant n'a reçu aucune commande",
+  (await journalMA()).length === 0,
 );
 
 console.log(echecs === 0 ? "\nTout passe." : `\n${echecs} vérification(s) en échec.`);
