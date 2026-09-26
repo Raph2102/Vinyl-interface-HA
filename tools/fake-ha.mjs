@@ -52,6 +52,8 @@ const sessions = new Set();
 const clientsMA = new Set();
 /** Faux : pas de superviseur, comme une installation Docker. */
 let avecSuperviseur = true;
+/** Données utilisateur du frontend (frontend/set_user_data), par clé. */
+let donneesUtilisateur = {};
 
 const INGRESS = "/api/hassio_ingress/FAUX-JETON-INGRESS/";
 const FILE_ID = "salon_file";
@@ -450,6 +452,7 @@ const serveur = createServer((req, res) => {
     journal.length = 0;
     journalMA.length = 0;
     sessions.clear();
+    donneesUtilisateur = {};
     avecSuperviseur = url.searchParams.get("superviseur") !== "0";
     res.writeHead(200, cors);
     return res.end(JSON.stringify({ ok: true }));
@@ -472,6 +475,11 @@ const serveur = createServer((req, res) => {
     annoncer("queue_items_updated");
     res.writeHead(200, cors);
     return res.end(JSON.stringify(file.map((t) => t.title)));
+  }
+
+  if (url.pathname === "/_user_data") {
+    res.writeHead(200, cors);
+    return res.end(JSON.stringify(donneesUtilisateur));
   }
 
   if (url.pathname === "/_journal_ma") {
@@ -678,6 +686,25 @@ serveur.on("upgrade", (req, socket) => {
           }
           break;
         }
+
+        /*
+         * Les données utilisateur du frontend : là que la platine range ce
+         * qu'on masque du bac et ce qu'on lit à l'envers, pour que ces choix
+         * suivent la personne d'un appareil à l'autre.
+         */
+        case "frontend/get_user_data":
+          envoyer({
+            id: msg.id,
+            type: "result",
+            success: true,
+            result: { value: msg.key ? (donneesUtilisateur[msg.key] ?? null) : donneesUtilisateur },
+          });
+          break;
+
+        case "frontend/set_user_data":
+          donneesUtilisateur[msg.key] = msg.value;
+          envoyer({ id: msg.id, type: "result", success: true, result: null });
+          break;
 
         case "config_entries/get":
           envoyer({
@@ -930,6 +957,60 @@ function musicAssistant(req, socket) {
           file.splice(vers, 0, pris);
           repondre(msg.message_id, null);
           annoncer("queue_items_updated");
+          break;
+        }
+
+        /*
+         * Les morceaux d'une playlist ou d'un album, dans leur ordre : c'est
+         * sur eux que se fait la lecture à l'envers. On les rend volontairement
+         * DÉSORDONNÉS : l'app doit remettre l'ordre du disque elle-même
+         * (position, ou disque puis piste), pas se fier à l'ordre d'arrivée.
+         */
+        case "music/playlists/playlist_tracks":
+        case "music/albums/album_tracks": {
+          const playlist = msg.command.includes("playlist");
+          const source = playlist ? PLAYLISTS : ALBUMS;
+          const disque = source.find((d) => d.uri.split("/").pop() === String(a.item_id));
+          if (!disque || a.provider_instance_id_or_domain !== "library") {
+            erreur(msg.message_id, "media item not found");
+            break;
+          }
+          const pistes = pistesDe(disque).map((t, k) => ({
+            media_type: "track",
+            uri: t.uri,
+            name: t.title,
+            duration: t.duration,
+            artists: [{ media_type: "artist", name: t.artist }],
+            ...(playlist ? { position: k + 1 } : { disc_number: 1, track_number: k + 1 }),
+          }));
+          // Désordonnées exprès, pour vérifier que l'app retrie.
+          repondre(msg.message_id, [...pistes.slice(3), ...pistes.slice(0, 3)]);
+          break;
+        }
+
+        case "player_queues/play_media": {
+          const media = Array.isArray(a.media) ? a.media : [a.media];
+          if (a.option !== "replace" || media.length === 0) {
+            erreur(msg.message_id, "option non prise en charge par le faux serveur");
+            break;
+          }
+          file = media.map((uri, k) => ({
+            id: randomUUID().replace(/-/g, ""),
+            uri,
+            title: `Piste ${String(uri).split("/").pop()}`,
+            artist: "Artistes variés",
+            album: "Lecture à l'envers",
+            duration: 200 + k,
+            image: null,
+          }));
+          rangCourant = 0;
+          etat.state = "playing";
+          etat.attributes.media_title = file[0].title;
+          etat.attributes.media_position = 0;
+          etat.attributes.media_position_updated_at = new Date().toISOString();
+          pousserEtat?.();
+          repondre(msg.message_id, null);
+          setTimeout(() => annoncer("queue_items_updated"), 100);
           break;
         }
 

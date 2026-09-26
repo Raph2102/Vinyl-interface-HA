@@ -5,6 +5,7 @@ import {
   DEFAULTS,
   type BackgroundStyle,
   type Settings,
+  type MarbleMotif,
   type VinylStyle,
 } from "../lib/settings";
 
@@ -35,6 +36,18 @@ const VINYLS: [VinylStyle, string][] = [
   ["tinted", "Teinté"],
   ["marble", "Marbré"],
   ["splatter", "Éclaboussé"],
+];
+
+/**
+ * Motifs du marbré. La coulée est celle d'origine ; les autres sont calculés
+ * comme une pâte écrasée en tournant sous la presse (voir marbling.ts).
+ */
+const MOTIFS: [MarbleMotif, string][] = [
+  ["coulee", "Coulée"],
+  ["tourbillon", "Tourbillon"],
+  ["remous", "Remous"],
+  ["agate", "Agate"],
+  ["nebuleuse", "Nébuleuse"],
 ];
 
 /** Les matières qui se teintent : les autres ignorent la couleur choisie. */
@@ -218,6 +231,24 @@ export function Setup({
             ))}
           </div>
         </div>
+
+        {/* Le motif ne concerne que le marbré : on ne l'offre que pour lui. */}
+        {draft.vinyl === "marble" && (
+          <div className="field">
+            <label>Motif du marbré</label>
+            <div className="segmented">
+              {MOTIFS.map(([value, name]) => (
+                <button
+                  key={value}
+                  aria-pressed={draft.marbleMotif === value}
+                  onClick={() => set("marbleMotif", value)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="field">
           <label>Fond</label>

@@ -10,6 +10,11 @@
 
 export type VinylStyle = "clear" | "glass" | "black" | "tinted" | "marble" | "splatter";
 export type BackgroundStyle = "adaptive" | "subtle" | "neutral" | "dark";
+/**
+ * Motif du marbré. « coulee » est le motif d'origine, peint par des filtres
+ * SVG ; les autres sont calculés en coordonnées polaires (voir marbling.ts).
+ */
+export type MarbleMotif = "coulee" | "tourbillon" | "remous" | "agate" | "nebuleuse";
 /** Comment on lance et arrête la lecture. */
 export type PlayControl = "arm" | "button";
 
@@ -41,6 +46,8 @@ export interface Settings {
   entityId: string;
 
   vinyl: VinylStyle;
+  /** Motif du disque marbré ; sans effet sur les autres matières. */
+  marbleMotif: MarbleMotif;
   background: BackgroundStyle;
   /**
    * "arm"    : on pose l'aiguille sur le disque pour lancer, on la retire pour
@@ -102,6 +109,7 @@ export const DEFAULTS: Settings = {
    * la pochette ». Le disque change donc de teinte avec l'album.
    */
   vinyl: "marble",
+  marbleMotif: "coulee",
   background: "adaptive",
   playControl: "arm",
   counterRotateLabel: false,

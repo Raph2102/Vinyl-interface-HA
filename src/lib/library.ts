@@ -63,6 +63,10 @@ export interface QueueView {
   note: string | null;
 }
 
+export interface PlayOptions {
+  reversed?: boolean;
+}
+
 export interface SearchResults {
   albums: Media[];
   playlists: Media[];
@@ -72,7 +76,13 @@ export interface SearchResults {
 export interface LibrarySource {
   albums(): Promise<Media[]>;
   playlists(): Promise<Media[]>;
-  play(item: Media): Promise<void>;
+  /**
+   * Pose un disque. `reversed` le lit du dernier morceau au premier — utile
+   * pour une playlist qu'on remplit par la fin, dont les nouveautés sont au bout.
+   */
+  play(item: Media, options?: PlayOptions): Promise<void>;
+  /** La lecture à l'envers est-elle possible ici ? Elle passe par Music Assistant. */
+  canReverse(): boolean;
   /** Recherche globale chez le fournisseur — donc dans tout Deezer. */
   search(query: string): Promise<SearchResults>;
   /** Ce qui va suivre sur l'enceinte. */
@@ -158,14 +168,56 @@ export function haLibrary(
     return tout.map((m) => ({ ...m, image: image(m.image) }));
   };
 
+  /*
+   * Lire à l'envers.
+   *
+   * Music Assistant sait lire une liste d'URI dans l'ordre qu'on lui donne :
+   * on lit donc les morceaux de l'album ou de la playlist, on les retourne, et
+   * on les lui confie en remplaçant la file. Son paramètre `sort_by` ferait
+   * peut-être la même chose, mais ses valeurs ne sont documentées nulle part :
+   * on ne bâtit pas là-dessus.
+   */
+  const playReversed = async (item: Media) => {
+    const ref = readUri(item.uri);
+    if (!ref || !mass) throw new Error("URI illisible");
+    const commande =
+      item.kind === "playlist" ? "music/playlists/playlist_tracks" : "music/albums/album_tracks";
+    const pistes = await mass.command<Record<string, any>[]>(commande, {
+      item_id: ref.id,
+      provider_instance_id_or_domain: ref.provider,
+    });
+    const uris = inOrder(Array.isArray(pistes) ? pistes : [])
+      .map((t) => (typeof t.uri === "string" ? t.uri : ""))
+      .filter(Boolean)
+      .reverse();
+    if (uris.length === 0) throw new Error("liste vide");
+    if (!queueId) await summary();
+    if (!queueId) throw new Error("file introuvable");
+    await mass.command("player_queues/play_media", {
+      queue_id: queueId,
+      media: uris,
+      option: "replace",
+    });
+  };
+
   return {
     albums: () => library("album", 5000),
+
+    canReverse: () => Boolean(mass) && !mass?.unavailable,
 
     async playlists() {
       return arrangePlaylists(await library("playlist", 2000));
     },
 
-    async play(item) {
+    async play(item, options) {
+      if (options?.reversed && item.kind !== "track" && mass && (await mass.ready())) {
+        try {
+          await playReversed(item);
+          return;
+        } catch {
+          /* la liste n'a pas pu être lue : on joue dans l'ordre plutôt que rien */
+        }
+      }
       /*
        * Album et playlist REMPLACENT la file : on pose un disque, on ne l'ajoute
        * pas à une pile. Un morceau trouvé par la recherche passe devant sans
@@ -401,6 +453,36 @@ function toQueueItem(e: unknown, image: (url: string | null) => string | null): 
     image: image(readImage(entree) ?? readImage(media) ?? readImage(media.album ?? {})),
     duration: Number(entree.duration ?? media.duration ?? 0) || 0,
   };
+}
+
+/** « library://playlist/64 » → fournisseur « library », identifiant « 64 ». */
+export function readUri(uri: string): { provider: string; id: string } | null {
+  const m = /^([^:/]+):\/\/[^/]+\/(.+)$/.exec(uri);
+  return m?.[1] && m[2] ? { provider: m[1], id: m[2] } : null;
+}
+
+/**
+ * Les pistes dans l'ordre du disque : la position pour une playlist, le numéro
+ * de disque puis de piste pour un album. Faute de repère, l'ordre reçu.
+ */
+function inOrder(pistes: Record<string, any>[]): Record<string, any>[] {
+  const cle = (t: Record<string, any>, i: number): number[] => {
+    if (typeof t.position === "number") return [t.position, i];
+    const disque = Number(t.disc_number ?? 0) || 0;
+    const piste = Number(t.track_number ?? NaN);
+    return Number.isFinite(piste) ? [disque, piste, i] : [Infinity, i];
+  };
+  const cles = pistes.map(cle);
+  return pistes
+    .map((t, i) => ({ t, k: cles[i]! }))
+    .sort((a, b) => {
+      for (let n = 0; n < Math.max(a.k.length, b.k.length); n++) {
+        const d = (a.k[n] ?? 0) - (b.k[n] ?? 0);
+        if (d) return d;
+      }
+      return 0;
+    })
+    .map(({ t }) => t);
 }
 
 function toIndex(v: unknown): number {
@@ -650,9 +732,23 @@ export function demoLibrary(client: PlayerClient, entityId: string): LibrarySour
       return arrangePlaylists(liste);
     },
 
-    async play(item) {
+    async play(item, options) {
+      // La file de démonstration suit le disque posé, dans le sens demandé.
+      const pistes = Array.from({ length: 8 }, (_, k) => ({
+        id: `demo-${item.name}-${k}`,
+        uri: item.uri,
+        name: `${item.name} · piste ${k + 1}`,
+        artist: item.artist || "Artistes variés",
+        image: item.image,
+        duration: 180 + ((k * 29) % 120),
+      }));
+      file = options?.reversed ? pistes.reverse() : pistes;
+      courant = 0;
+      prevenir();
       await jouer(item);
     },
+
+    canReverse: () => true,
 
     async search(query) {
       const q = query.trim().toLowerCase();

@@ -313,6 +313,8 @@ export function Turntable({
            * suite le trucage.
            */}
           <div className="disc__layer disc__pattern" />
+          {/* Veines claires des motifs calculés ; vide pour les autres matières. */}
+          <div className="disc__layer disc__veins" />
           <div className="disc__layer disc__grooves" />
           <div className="disc__layer disc__aniso" />
           {/* Micro-marques de pressage : ce sont elles qui, en passant sous la

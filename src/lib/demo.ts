@@ -230,12 +230,14 @@ export function isDemo(): boolean {
  * Surcharges d'apparence par l'URL, pour comparer deux rendus côte à côte sans
  * passer par les réglages : ?demo=1&vinyl=black&bg=neutral
  */
-export function demoOverrides(): Partial<{ vinyl: string; background: string }> {
+export function demoOverrides(): Partial<{ vinyl: string; background: string; marbleMotif: string }> {
   const params = new URLSearchParams(window.location.search);
   const out: Record<string, string> = {};
   const vinyl = params.get("vinyl");
   const bg = params.get("bg");
   if (vinyl) out.vinyl = vinyl;
+  const motif = params.get("motif");
+  if (motif) out.marbleMotif = motif;
   if (bg) out.background = bg;
   return out;
 }

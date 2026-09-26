@@ -336,6 +336,21 @@ await capturer("bibliotheque");
 await aller("?demo=1&playlists=1", 4600);
 await capturer("playlists");
 
+// 2 ter. Le choix de ce qui s'affiche : deux playlists masquées, les coups de
+// cœur lus à l'envers.
+await evaluer(`document.querySelector(".library__manage")?.click()`);
+await sleep(700);
+await evaluer(`(() => {
+  const lignes = [...document.querySelectorAll(".manage__item")];
+  const cocher = (nom, n) => lignes.find((l) => l.querySelector("b").textContent === nom)?.querySelectorAll(".manage__switch")[n].click();
+  const autres = lignes.map((l) => l.querySelector("b").textContent).filter((n) => /^100%/.test(n)).slice(-2);
+  for (const nom of autres) cocher(nom, 0);
+  cocher("Coups de cœur", 1);
+  return true;
+})()`);
+await sleep(900);
+await capturer("gerer");
+
 // 3. La file d'attente, puis pendant qu'on y déplace un morceau.
 await aller("?demo=1&queue=1", 4200);
 await capturer("file");
@@ -383,6 +398,12 @@ await capturer("reglages");
 // 7. L'écran de repos.
 await aller("?demo=1&rest=1", 4200);
 await capturer("repos");
+
+// 8 bis. Les motifs du marbré calculés, un par un.
+for (const motif of ["tourbillon", "remous", "agate", "nebuleuse"]) {
+  await aller(`?demo=1&vinyl=marble&motif=${motif}`, 4200);
+  await capturer(`motif-${motif}`);
+}
 
 // 8. Les matières du disque, une par une.
 for (const [matiere, nom] of [

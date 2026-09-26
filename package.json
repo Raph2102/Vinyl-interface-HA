@@ -1,7 +1,7 @@
 {
   "name": "md-vinyl-ha",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "type": "module",
   "description": "Platine vinyle virtuelle pour Home Assistant + Music Assistant (Deezer)",
   "scripts": {

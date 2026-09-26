@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Ambient } from "./components/Ambient";
 import { Controls, TopBar } from "./components/Controls";
-import { Library, type LibraryTab } from "./components/Library";
+import { Library, enTrainDeTaper, type LibraryTab } from "./components/Library";
 import { LyricsPane } from "./components/LyricsPane";
 import { Queue } from "./components/Queue";
 import { Rest } from "./components/Rest";
@@ -30,7 +30,9 @@ import {
   type QueueView,
   type SearchResults,
 } from "./lib/library";
+import { marbleMasks } from "./lib/marbling";
 import { MassLink } from "./lib/mass";
+import { haPrefs, localPrefs, type LibraryPrefs, type PrefsStore } from "./lib/prefs";
 import { NO_LYRICS, fetchLyrics, lineAt, parseLrc, type Lyrics } from "./lib/lyrics";
 import { NEUTRAL, extractPalette, type Palette } from "./lib/palette";
 import { formatTime, readPlayback, syncClock } from "./lib/position";
@@ -40,6 +42,7 @@ import {
   isConfigured,
   loadSettings,
   saveSettings,
+  type MarbleMotif,
   type Settings,
 } from "./lib/settings";
 import type { ConnectionStatus, HaEntity, PlayerClient } from "./lib/types";
@@ -97,6 +100,10 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
   const [playlists, setPlaylists] = useState<Media[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
+
+  /** Ce qu'on masque du bac et ce qu'on lit à l'envers ; suit la personne. */
+  const [prefs, setPrefs] = useState<LibraryPrefs>(() => localPrefs().cached());
+  const prefsStore = useRef<PrefsStore>(localPrefs());
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResults | null>(null);
@@ -164,6 +171,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
       embedded.connect([entityId]);
       const mass = new MassLink(embedded);
       massRef.current = mass;
+      prefsStore.current = haPrefs(embedded);
 
       /*
        * L'heure du serveur est relevée AUSSI dans le panneau.
@@ -212,6 +220,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
      */
     const mass = DEMO ? null : new MassLink(client as HaClient, baseUrl(connection));
     massRef.current = mass;
+    prefsStore.current = DEMO ? localPrefs() : haPrefs(client as HaClient);
 
     return () => {
       client.close();
@@ -411,6 +420,37 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     root.style.setProperty("--vinyl-tint", settings.vinylTint || palette.vivid);
   }, [palette, settings.vinylTint]);
 
+  // ------------------------------------------------------------- motif du marbré
+
+  /*
+   * Les motifs calculés (tourbillon, agate…) n'arrivent qu'une fois leurs
+   * masques prêts — une fraction de seconde la première fois, puis aussitôt.
+   * D'ici là, le disque garde la coulée : jamais de disque nu.
+   */
+  const [marbleShown, setMarbleShown] = useState<MarbleMotif | null>(null);
+  const vinylVoulu = (DEMO && demoOverrides().vinyl) || settings.vinyl;
+  const motifVoulu = ((DEMO && demoOverrides().marbleMotif) || settings.marbleMotif) as MarbleMotif;
+
+  useEffect(() => {
+    const promesse = vinylVoulu === "marble" ? marbleMasks(motifVoulu) : null;
+    if (!promesse) {
+      setMarbleShown(null);
+      return;
+    }
+    let vivant = true;
+    void promesse.then((masques) => {
+      const root = rootRef.current;
+      if (!vivant || !root) return;
+      root.style.setProperty("--marble-color", `url("${masques.color}")`);
+      root.style.setProperty("--marble-dark", `url("${masques.dark}")`);
+      root.style.setProperty("--marble-light", `url("${masques.light}")`);
+      setMarbleShown(motifVoulu);
+    });
+    return () => {
+      vivant = false;
+    };
+  }, [motifVoulu, vinylVoulu]);
+
   // ------------------------------------------------------------- activité
 
   useEffect(() => {
@@ -472,6 +512,63 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     const timer = setInterval(check, 15 * 60_000);
     return () => clearInterval(timer);
   }, []);
+
+  // ------------------------------------------------------------- préférences du bac
+
+  /*
+   * Chargées une fois la liaison établie : avant, Home Assistant ne répond pas
+   * et l'on ne verrait que la copie locale. Celle-ci sert d'état initial, si
+   * bien que le bac s'ouvre déjà filtré.
+   */
+  const prefsLoaded = useRef(false);
+  useEffect(() => {
+    if (status !== "connected" || prefsLoaded.current) return;
+    prefsLoaded.current = true;
+    void prefsStore.current.load().then((chargees) => {
+      prefsSaved.current = JSON.stringify(chargees);
+      setPrefs(chargees);
+    });
+  }, [status]);
+
+  // Enregistrées un instant après le dernier changement : cocher dix cases ne
+  // doit pas faire dix allers-retours.
+  const prefsSaved = useRef(JSON.stringify(prefs));
+  useEffect(() => {
+    const texte = JSON.stringify(prefs);
+    if (texte === prefsSaved.current) return;
+    const timer = setTimeout(() => {
+      prefsSaved.current = texte;
+      void prefsStore.current.save(prefs).catch(() => {
+        /* Home Assistant injoignable : la copie locale est déjà écrite */
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [prefs]);
+
+  const hiddenSet = useMemo(() => new Set(prefs.hidden), [prefs.hidden]);
+  const reversedSet = useMemo(() => new Set(prefs.reversed), [prefs.reversed]);
+  const reversedRef = useRef(reversedSet);
+  reversedRef.current = reversedSet;
+
+  const basculer = (liste: string[], uri: string) =>
+    liste.includes(uri) ? liste.filter((u) => u !== uri) : [...liste, uri];
+  const toggleHidden = useCallback(
+    (uri: string) => setPrefs((p) => ({ ...p, hidden: basculer(p.hidden, uri) })),
+    [],
+  );
+  const toggleReversed = useCallback(
+    (uri: string) => setPrefs((p) => ({ ...p, reversed: basculer(p.reversed, uri) })),
+    [],
+  );
+  const setVisible = useCallback(
+    (uris: string[], visible: boolean) =>
+      setPrefs((p) => {
+        const cibles = new Set(uris);
+        const reste = p.hidden.filter((u) => !cibles.has(u));
+        return { ...p, hidden: visible ? reste : [...reste, ...uris] };
+      }),
+    [],
+  );
 
   // ------------------------------------------------------------- bibliothèque
 
@@ -556,16 +653,16 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
    * rendu à l'autre : l'app se redessine à chaque seconde de lecture, et un
    * tableau ou un rappel neuf à chaque fois relançait la boucle du bac.
    */
+  const tabItems = libraryTab === "albums" ? albums : playlists;
   const crateItems = useMemo(
     () =>
       results
-        ? libraryTab === "albums"
+        ? // Une recherche montre tout : on cherche justement ce qu'on ne voit pas.
+          libraryTab === "albums"
           ? [...results.albums, ...results.tracks]
           : results.playlists
-        : libraryTab === "albums"
-          ? albums
-          : playlists,
-    [albums, libraryTab, playlists, results],
+        : tabItems.filter((i) => !hiddenSet.has(i.uri)),
+    [hiddenSet, libraryTab, results, tabItems],
   );
   const favorite = useMemo(() => playlists.find((p) => p.pinned) ?? null, [playlists]);
   const browsing = useRef({ tab: libraryTab, searching: false });
@@ -884,7 +981,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
    * réponse de Home Assistant, puisque le disque n'apparaît qu'à l'atterrissage.
    */
   const playMedia = useCallback((album: Media, from: HTMLElement) => {
-    void librarySource.current?.play(album);
+    void librarySource.current?.play(album, { reversed: reversedRef.current.has(album.uri) });
 
     const crate = from.parentElement;
     /*
@@ -1135,7 +1232,9 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
   // Raccourcis clavier, pour l'usage au bureau.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement)?.tagName === "INPUT" || showSetup) return;
+      // Taper une espace dans la recherche mettait la musique en pause dans le
+      // panneau : la cible y est l'hôte du shadow DOM, pas le champ.
+      if (enTrainDeTaper(e) || showSetup || showLibrary) return;
       const volume = attrs?.volume_level ?? 0;
       switch (e.key) {
         case " ":
@@ -1163,7 +1262,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [attrs?.volume_level, call, next, previous, showSetup, togglePlay]);
+  }, [attrs?.volume_level, call, next, previous, showLibrary, showSetup, togglePlay]);
 
   // ------------------------------------------------------------- rendu
 
@@ -1187,7 +1286,12 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     error: "Erreur de connexion",
   };
 
-  const look = { vinyl: settings.vinyl, background: settings.background, ...(DEMO ? demoOverrides() : {}) };
+  const look = {
+    vinyl: settings.vinyl,
+    background: settings.background,
+    marbleMotif: settings.marbleMotif as string,
+    ...(DEMO ? demoOverrides() : {}),
+  };
 
   /*
    * La scène ne se décale que pour les volets latéraux. Les paroles sont
@@ -1205,6 +1309,7 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
       className="app"
       ref={rootRef}
       data-vinyl={look.vinyl}
+      data-marble={marbleShown ?? undefined}
       data-bg={look.background}
       data-panel={panelOuvert}
     >
@@ -1345,6 +1450,13 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
           tab={libraryTab}
           onTab={chooseTab}
           favorite={favorite}
+          allItems={tabItems}
+          hidden={hiddenSet}
+          reversed={reversedSet}
+          canReverse={librarySource.current?.canReverse() ?? DEMO}
+          onToggleHidden={toggleHidden}
+          onToggleReversed={toggleReversed}
+          onSetVisible={setVisible}
           loading={libraryLoading}
           error={libraryError}
           onPlay={playMedia}

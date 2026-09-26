@@ -67,6 +67,21 @@ musique démarre.
   <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/playlists.jpg" alt="Le bac des playlists, avec le raccourci Coups de cœur" />
 </p>
 
+### Ce qui s'affiche, et dans quel sens
+
+Le petit réglage à côté des onglets ouvre la liste du bac. On y **retire** les
+albums et playlists qui n'ont rien à y faire — rien n'est supprimé, ils
+disparaissent seulement du bac — et on marque ceux qu'on veut **lire à
+l'envers**, du dernier morceau au premier : une playlist qu'on remplit par la
+fin démarre alors sur ses nouveautés. Un filtre permet d'agir en masse.
+
+Ces choix suivent la personne : ils sont gardés par Home Assistant, et se
+retrouvent sur la tablette comme sur l'ordinateur.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/gerer.jpg" alt="Choisir les playlists affichées et celles lues à l'envers" />
+</p>
+
 ---
 
 ## La file d'attente, qu'on range au doigt
@@ -147,6 +162,19 @@ dans le brun gris, un pigment de vinyle jamais.
   </tr>
 </table>
 
+Le marbré se décline en **cinq motifs**. Au motif d'origine s'ajoutent quatre
+motifs calculés comme la matière se forme sous la presse : une galette de pâtes
+mêlées, écrasée en tournant, dont les veines s'étirent en arcs autour du centre.
+
+<table>
+  <tr>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-tourbillon.jpg" alt="Tourbillon" /><p align="center"><b>Tourbillon</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-remous.jpg" alt="Remous" /><p align="center"><b>Remous</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-agate.jpg" alt="Agate" /><p align="center"><b>Agate</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-nebuleuse.jpg" alt="Nébuleuse" /><p align="center"><b>Nébuleuse</b></p></td>
+  </tr>
+</table>
+
 S'ajoutent le blanc et le teinté. Avec, dans les réglages, la taille des
 pochettes, le texte de l'étiquette, le fond adaptatif et la vitesse de rotation.
 
@@ -223,7 +251,8 @@ les playlists, la recherche, la file d'attente et le transfert entre pièces.
 complémentaire** (Home Assistant OS ou supervisé) et un compte administrateur :
 c'est par le superviseur que passe la liaison. Ailleurs — Music Assistant en
 Docker, par exemple — la file montre le morceau en cours et le suivant, et le
-dit.
+dit. La lecture à l'envers passe par la même liaison ; sans elle, on lit dans
+l'ordre.
 
 **Les pochettes viennent du fournisseur.** Elles sont chargées depuis son CDN et
 lues dans un canvas pour en extraire les couleurs du fond adaptatif — ce qui
@@ -245,7 +274,7 @@ Le dépôt contient de quoi vérifier sans instance sous la main :
 | Commande | Ce qu'elle vérifie |
 | --- | --- |
 | `npm run fake-ha` | Un faux Home Assistant qui parle le vrai protocole — poignée de main du WebSocket, format compressé des états, actions avec réponse — et, derrière un faux ingress, un faux Music Assistant : session, cookie, file, déplacements avec les mêmes refus que le vrai, événements. Les formes des réponses sont relevées sur une vraie installation. |
-| `npm run check:ha` | Plus de quatre-vingts contrôles de bout en bout contre ce faux serveur, dans un vrai navigateur : ce que l'app **affiche**, et ce qu'elle **envoie**. Avant le moindre clic, il prouve qu'il parle bien au faux serveur, et s'arrête sinon. |
+| `npm run check:ha` | Près d'une centaine de contrôles de bout en bout contre ce faux serveur, dans un vrai navigateur : ce que l'app **affiche**, et ce qu'elle **envoie**. Avant le moindre clic, il prouve qu'il parle bien au faux serveur, et s'arrête sinon. |
 | `npm run check:gestures` | Les gestes, pilotés par le protocole DevTools : poser l'aiguille, la retirer, balayer. |
 | `npm run diagnose` | Diagnostic complet d'une vraie installation, étape par étape. |
 | `npm run check:real` | L'app entière contre une vraie instance, en lecture seule. |

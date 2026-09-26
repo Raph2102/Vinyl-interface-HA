@@ -802,6 +802,162 @@ verifier(
 await evaluer("document.querySelector('[aria-label=\"Fermer la file\"]')?.click()");
 await sleep(400);
 
+// --------------------------------------------------- 5 ter. ce qui s'affiche, et à l'envers
+
+console.log("\n-- choisir ce qui s'affiche --");
+await reveiller();
+await evaluer("document.querySelector('[aria-label=\"Bibliothèque\"]')?.click()");
+await sleep(1200);
+await evaluer(`[...document.querySelectorAll(".library__tabs button")].find((b) => b.textContent === "Playlists")?.click()`);
+await sleep(900);
+await evaluer(`document.querySelector(".library__manage")?.click()`);
+await sleep(700);
+
+const lireChoix = async () =>
+  JSON.parse(
+    await evaluer(`JSON.stringify({
+      ouvert: !!document.querySelector(".manage"),
+      lignes: [...document.querySelectorAll(".manage__item b")].map((e) => e.textContent),
+      compte: document.querySelector(".library__count")?.textContent ?? null,
+      pastille: document.querySelector(".library__badge")?.textContent ?? null,
+      legende: document.querySelector(".manage h2 small")?.textContent ?? null,
+    })`),
+  );
+
+let choix = await lireChoix();
+verifier("le réglage à côté des onglets ouvre la liste du bac", choix.ouvert && choix.lignes.length === 7, `${choix.lignes.length} ligne(s)`);
+
+/** Bascule l'interrupteur n (0 = dans le bac, 1 = à l'envers) de la ligne nommée. */
+const basculer = (nom, n) =>
+  evaluer(`(() => {
+    const ligne = [...document.querySelectorAll(".manage__item")].find((l) => l.querySelector("b").textContent === ${JSON.stringify(nom)});
+    ligne.querySelectorAll(".manage__switch")[${n}].click();
+    return true;
+  })()`);
+
+await basculer("Dimanche matin", 0);
+await basculer("Jazz de minuit", 0);
+await sleep(400);
+choix = await lireChoix();
+verifier(
+  "masquer deux playlists les retire du bac",
+  (choix.compte ?? "").startsWith("5 playlist") && choix.pastille === "2",
+  `${choix.compte}, pastille ${choix.pastille}`,
+);
+verifier("elles restent dans la liste, pour pouvoir les rappeler", choix.lignes.length === 7);
+
+await basculer("Coups de cœur", 1);
+await sleep(900);
+let donnees = (await (await fetch(`${HA}/_user_data`)).json()).md_vinyl_library ?? null;
+verifier(
+  "les choix sont rangés dans les données utilisateur de Home Assistant",
+  donnees?.hidden?.length === 2 &&
+    donnees.hidden.includes("library://playlist/3") &&
+    donnees.hidden.includes("library://playlist/7") &&
+    donnees.reversed?.includes("library://playlist/1"),
+  JSON.stringify(donnees),
+);
+
+// Le filtre sert à agir en masse.
+await saisir(".manage__tools input", "de");
+await sleep(300);
+const filtrees = (await lireChoix()).lignes;
+verifier(
+  "le filtre réduit la liste",
+  filtrees.length > 0 && filtrees.length < 7 && filtrees.every((n) => n.toLowerCase().includes("de")),
+  filtrees.join(" / "),
+);
+await saisir(".manage__tools input", "");
+await sleep(200);
+
+// Retrouver ses choix ailleurs : on efface la copie locale et on recharge.
+// S'ils reviennent, c'est Home Assistant qui les a rendus.
+await evaluer(`localStorage.removeItem("mdvinyl.library.v1"), true`);
+await envoyer("Page.reload");
+await sleep(3200);
+await exigerLeFaux();
+await reveiller();
+await evaluer("document.querySelector('[aria-label=\"Bibliothèque\"]')?.click()");
+await sleep(1500);
+await evaluer(`[...document.querySelectorAll(".library__tabs button")].find((b) => b.textContent === "Playlists")?.click()`);
+await sleep(900);
+choix = await lireChoix();
+verifier(
+  "après rechargement, sans copie locale, le bac est toujours filtré : les choix viennent de Home Assistant",
+  (choix.compte ?? "").startsWith("5 playlist"),
+  choix.compte ?? "",
+);
+
+// La lecture à l'envers, par le raccourci des coups de cœur.
+lu = (await (await fetch(`${HA}/_journal`)).json()).length;
+const avantMA = (await journalMA()).length;
+await evaluer(`document.querySelector(".library__fav")?.click()`);
+await sleep(1800);
+const commandesMA = (await journalMA()).slice(avantMA);
+const pistes = commandesMA.find((m) => m.command === "music/playlists/playlist_tracks");
+const lectureEnvers = commandesMA.find((m) => m.command === "player_queues/play_media");
+verifier(
+  "la lecture à l'envers lit d'abord les morceaux de la playlist chez Music Assistant",
+  pistes?.args?.item_id === "1" && pistes?.args?.provider_instance_id_or_domain === "library",
+  JSON.stringify(pistes?.args ?? null),
+);
+const attenduEnvers = Array.from({ length: 8 }, (_, k) => `library://track/1${7 - k}`);
+verifier(
+  "puis les joue du dernier au premier, dans l'ordre de la playlist et non dans l'ordre reçu",
+  JSON.stringify(lectureEnvers?.args?.media) === JSON.stringify(attenduEnvers) && lectureEnvers?.args?.option === "replace",
+  JSON.stringify(lectureEnvers?.args?.media ?? null),
+);
+recent = await journalDepuis();
+verifier(
+  "sans passer par le play_media de Home Assistant, qui la lirait dans l'ordre",
+  !recent.some((m) => m.service === "play_media"),
+  recent.map((m) => m.service).join(", "),
+);
+
+await reveiller();
+await evaluer('document.querySelector(\'[title="À suivre"]\')?.click()');
+await sleep(1500);
+const fileEnvers = await lireFile();
+verifier(
+  "la file commence par le dernier morceau de la playlist",
+  fileEnvers.titres[0] === "Piste 17" && fileEnvers.titres.length === 8,
+  fileEnvers.titres.slice(0, 3).join(" / "),
+);
+await evaluer("document.querySelector('[aria-label=\"Fermer la file\"]')?.click()");
+await sleep(400);
+
+// On rend le bac entier pour la suite.
+await reveiller();
+await evaluer("document.querySelector('[aria-label=\"Bibliothèque\"]')?.click()");
+await sleep(1000);
+await evaluer(`document.querySelector(".library__manage")?.click()`);
+await sleep(500);
+await evaluer(`[...document.querySelectorAll(".manage__bulk button")][0]?.click()`);
+await sleep(300);
+choix = await lireChoix();
+verifier("« Tout afficher » rend tout le bac", (choix.compte ?? "").startsWith("7 playlist") && choix.pastille === null, choix.compte ?? "");
+
+// Taper dans un champ ne doit jamais piloter la platine.
+lu = (await (await fetch(`${HA}/_journal`)).json()).length;
+await evaluer(`(() => {
+  const champ = document.querySelector(".manage__tools input");
+  champ.focus();
+  for (const key of [" ", "ArrowRight", "ArrowLeft"]) champ.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true }));
+  return true;
+})()`);
+await sleep(600);
+recent = await journalDepuis();
+verifier(
+  "une espace ou une flèche tapée dans un champ ne pilote pas la platine",
+  !recent.some((m) => ["media_play_pause", "media_next_track", "media_previous_track"].includes(m.service)),
+  recent.map((m) => m.service).join(", "),
+);
+await evaluer(`window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })), true`);
+await sleep(300);
+verifier("Échap referme d'abord le volet, pas le bac", !(await evaluer(`!!document.querySelector(".manage")`)) && (await evaluer(`!!document.querySelector(".library")`)));
+await evaluer("document.querySelector('[aria-label=\"Retour à la platine\"]')?.click()");
+await sleep(600);
+
 // --------------------------------------------------- 6. enceintes et transfert
 
 console.log("\n-- enceintes --");

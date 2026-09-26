@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Media } from "../lib/library";
 import { NEUTRAL, extractPalette, type Palette } from "../lib/palette";
 import { Ambient } from "./Ambient";
+import { LibraryManager } from "./LibraryManager";
 
 export type LibraryTab = "albums" | "playlists";
 
@@ -33,6 +34,14 @@ interface LibraryProps {
   onTab: (tab: LibraryTab) => void;
   /** Playlist des coups de cœur, jouable d'une touche depuis l'en-tête. */
   favorite: Media | null;
+  /** Tout le contenu du bac, masqués compris : c'est ce que liste le choix. */
+  allItems: Media[];
+  hidden: Set<string>;
+  reversed: Set<string>;
+  canReverse: boolean;
+  onToggleHidden: (uri: string) => void;
+  onToggleReversed: (uri: string) => void;
+  onSetVisible: (uris: string[], visible: boolean) => void;
   loading: boolean;
   error: string | null;
   /** Reçoit aussi l'élément touché : c'est le point de départ du vol vers la platine. */
@@ -92,6 +101,13 @@ export function Library({
   tab,
   onTab,
   favorite,
+  allItems,
+  hidden,
+  reversed,
+  canReverse,
+  onToggleHidden,
+  onToggleReversed,
+  onSetVisible,
   loading,
   error,
   onPlay,
@@ -111,6 +127,8 @@ export function Library({
   const [, setSelected] = useState<number | null>(null);
   /** Un album est en train de rejoindre la platine : on n'en accepte pas un second. */
   const [busy, setBusy] = useState(false);
+  /** Le volet « ce qui s'affiche » est ouvert. */
+  const [managing, setManaging] = useState(false);
   /*
    * On garde la palette entière, plus seulement « claire ou sombre ».
    *
@@ -132,6 +150,8 @@ export function Library({
   const captionRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef(albums);
   itemsRef.current = albums;
+  const reversedRef = useRef(reversed);
+  reversedRef.current = reversed;
   const offset = useRef(resumeIndex ?? 0);
   /** Bac dans lequel la position d'ouverture a été posée (une fois par bac). */
   const placed = useRef<LibraryTab | null>(null);
@@ -141,6 +161,10 @@ export function Library({
   const scrolled = useRef(false);
 
   const count = albums.length;
+  const hiddenHere = useMemo(
+    () => allItems.filter((i) => hidden.has(i.uri)).length,
+    [allItems, hidden],
+  );
   const last = Math.max(0, count - 1);
 
   const visible = useMemo(() => {
@@ -358,7 +382,9 @@ export function Library({
         const legende = captionRef.current;
         if (legende) {
           legende.querySelector("b")!.textContent = item?.name ?? "";
-          legende.querySelector("span")!.textContent = item ? describe(item) : "";
+          legende.querySelector("span")!.textContent = item
+            ? describe(item) + (reversedRef.current.has(item.uri) ? " · lue à l'envers" : "")
+            : "";
           legende.dataset.pinned = String(Boolean(item?.pinned));
         }
         clearTimeout(settle);
@@ -375,7 +401,7 @@ export function Library({
     };
     // Relancée quand le contenu change (onglet, recherche) : la légende et le
     // fond doivent se réécrire même si le rang de face reste le même.
-  }, [albums, count, last, write, onFocusChange]);
+  }, [albums, reversed, count, last, write, onFocusChange]);
 
   /**
    * Distance à l'écran entre deux albums, en pixels.
@@ -464,13 +490,19 @@ export function Library({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        // Échap referme d'abord le volet, puis seulement le bac.
+        if (managing) setManaging(false);
+        else onClose();
+        return;
+      }
+      if (enTrainDeTaper(e) || managing) return;
       if (e.key === "ArrowRight") glideTo(Math.round(offset.current) + 1);
       else if (e.key === "ArrowLeft") glideTo(Math.round(offset.current) - 1);
-      else if (e.key === "Escape") onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [glideTo, onClose]);
+  }, [glideTo, managing, onClose]);
 
   // ------------------------------------------------------------ sélection
 
@@ -544,6 +576,25 @@ export function Library({
           ))}
         </div>
         {/*
+          * Le petit réglage à côté des onglets : ce qui s'affiche dans ce bac,
+          * et ce qu'on y lit à l'envers.
+          */}
+        <button
+          className="library__manage"
+          data-on={managing}
+          aria-label="Choisir ce qui s'affiche"
+          title="Choisir ce qui s'affiche"
+          onClick={() => setManaging((v) => !v)}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M4 6h9.2a3 3 0 0 1 5.6 0H20v2h-1.2a3 3 0 0 1-5.6 0H4V6zm12 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2zM4 16h1.2a3 3 0 0 1 5.6 0H20v2h-9.2a3 3 0 0 1-5.6 0H4v-2zm4 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2z"
+              fill="currentColor"
+            />
+          </svg>
+          {hiddenHere > 0 && <span className="library__badge">{hiddenHere}</span>}
+        </button>
+        {/*
           * Les coups de cœur, d'une touche : c'est la playlist qu'on relance le
           * plus souvent, elle ne doit pas se chercher au bout du bac.
           */}
@@ -578,6 +629,27 @@ export function Library({
       </header>
 
       {error && <p className="library__error">{error}</p>}
+
+      {/* Tout est masqué : sans ce mot, le bac vide passerait pour une panne. */}
+      {count === 0 && !loading && !searching && !query.trim() && hiddenHere > 0 && (
+        <p className="library__empty">
+          Tout est masqué dans ce bac. Le réglage à côté des onglets permet d'en réafficher.
+        </p>
+      )}
+
+      {managing && (
+        <LibraryManager
+          tab={tab}
+          items={allItems}
+          hidden={hidden}
+          reversed={reversed}
+          canReverse={canReverse}
+          onToggleHidden={onToggleHidden}
+          onToggleReversed={onToggleReversed}
+          onSetVisible={onSetVisible}
+          onClose={() => setManaging(false)}
+        />
+      )}
 
       <div
         className="crate"
@@ -665,4 +737,15 @@ function describe(item: Media): string {
   if (item.kind === "playlist") return item.pinned ? "Vos coups de cœur" : "Playlist";
   if (item.kind === "track") return item.artist ? `${item.artist} · titre` : "Titre";
   return item.artist;
+}
+
+/**
+ * La touche vient-elle d'un champ de saisie ? Dans le panneau, l'évènement
+ * remonte à la fenêtre avec pour cible l'élément hôte du shadow DOM : il faut
+ * lire la vraie cible dans composedPath.
+ */
+export function enTrainDeTaper(e: KeyboardEvent): boolean {
+  const cible = (e.composedPath()[0] ?? e.target) as HTMLElement | null;
+  const balise = cible?.tagName;
+  return balise === "INPUT" || balise === "TEXTAREA" || balise === "SELECT" || Boolean(cible?.isContentEditable);
 }

@@ -492,6 +492,47 @@ button {
 }
 
 /*
+ * Motifs calculés (tourbillon, remous, agate, nébuleuse) : leurs masques sont
+ * produits par marbling.ts et arrivent par des variables. L'attribut
+ * data-marble n'est posé qu'une fois les masques prêts ; avant, c'est la
+ * coulée ci-dessus qui s'affiche.
+ *
+ * L'ordre des couches s'inverse par rapport à la coulée : la veine sombre
+ * court DANS la couleur, elle doit donc passer au-dessus d'elle.
+ */
+.app[data-vinyl="marble"][data-marble] .disc__pattern::before {
+  background: radial-gradient(
+    circle at 34% 24%,
+    color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 88%, #ffffff) 0%,
+    var(--vinyl-tint, hsl(24 55% 45%)) 55%,
+    color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 80%, #000000) 100%
+  );
+  -webkit-mask-image: var(--marble-color);
+  mask-image: var(--marble-color);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  opacity: 1;
+}
+
+.app[data-vinyl="marble"][data-marble] .disc__pattern::after {
+  background: color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 55%, #000000);
+  -webkit-mask-image: var(--marble-dark);
+  mask-image: var(--marble-dark);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  opacity: 0.75;
+}
+
+.app[data-vinyl="marble"][data-marble] .disc__veins {
+  background: #fffdf8;
+  -webkit-mask-image: var(--marble-light);
+  mask-image: var(--marble-light);
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  opacity: 0.85;
+}
+
+/*
  * Éclaboussure : le rapport est INVERSÉ par rapport au marbré.
  *
  * Premier essai : la couleur déposée par grandes îles sur un fond crème. Le
@@ -2145,6 +2186,168 @@ button {
 .library__tabs button[data-on="true"] {
   color: hsl(220 12% 10%);
   background: hsl(0 0% 100% / 0.92);
+}
+
+/* Le petit réglage à côté des onglets : ce qui s'affiche dans le bac. */
+.library__manage {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--ink-dim);
+  background: hsl(0 0% 100% / 0.07);
+  border: 1px solid hsl(0 0% 100% / 0.09);
+  border-radius: 50%;
+  transition: background 0.2s var(--ease-soft), color 0.2s var(--ease-soft);
+}
+
+.library__manage:hover,
+.library__manage[data-on="true"] {
+  color: var(--ink);
+  background: hsl(0 0% 100% / 0.16);
+}
+
+.library__manage svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Combien de disques sont masqués dans ce bac. */
+.library__badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 18px;
+  color: hsl(220 12% 10%);
+  background: hsl(0 0% 100% / 0.9);
+  border-radius: 999px;
+}
+
+.library__empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  max-width: min(80vw, 420px);
+  transform: translate(-50%, -50%);
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: center;
+  color: var(--ink-dim);
+}
+
+/* ------------------------------------------------ volet « ce qui s'affiche » */
+
+.manage__tools {
+  display: grid;
+  gap: 10px;
+  padding: 14px 20px 6px;
+}
+
+.manage__tools input {
+  width: 100%;
+  padding: 9px 13px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--ink);
+  background: hsl(0 0% 100% / 0.07);
+  border: 1px solid hsl(0 0% 100% / 0.09);
+  border-radius: 999px;
+  outline: none;
+}
+
+.manage__tools input:focus {
+  border-color: hsl(0 0% 100% / 0.3);
+}
+
+.manage__bulk {
+  display: flex;
+  gap: 8px;
+}
+
+.manage__bulk button {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--ink-dim);
+  background: hsl(0 0% 100% / 0.06);
+  border-radius: 10px;
+  transition: background 0.18s var(--ease-soft), color 0.18s var(--ease-soft);
+}
+
+.manage__bulk button:hover {
+  color: var(--ink);
+  background: hsl(0 0% 100% / 0.12);
+}
+
+/* Les intitulés des deux colonnes d'interrupteurs, alignés sur eux. */
+.manage__legend {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 20px 2px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+.manage__legend span {
+  width: 50px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.manage__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  transition: opacity 0.2s var(--ease-soft);
+}
+
+/* Un disque masqué reste dans la liste, en retrait : on peut le rappeler. */
+.manage__item[data-hidden="true"] .queue__art,
+.manage__item[data-hidden="true"] .sidepanel__text {
+  opacity: 0.38;
+}
+
+.manage__switch {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 50px;
+  height: 32px;
+  color: var(--ink-faint);
+  background: hsl(0 0% 100% / 0.06);
+  border-radius: 999px;
+  transition: background 0.18s var(--ease-soft), color 0.18s var(--ease-soft);
+}
+
+.manage__switch + .manage__switch {
+  margin-left: -6px;
+}
+
+.manage__switch svg {
+  width: 18px;
+  height: 18px;
+}
+
+.manage__switch[aria-checked="true"] {
+  color: hsl(220 12% 10%);
+  background: hsl(0 0% 100% / 0.88);
+}
+
+.manage__switch:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .library__fav {
