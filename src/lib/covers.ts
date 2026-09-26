@@ -12,6 +12,36 @@
 
 const cache = new Map<string, string>();
 
+/**
+ * Une pochette à la taille où elle s'affiche.
+ *
+ * Music Assistant garde souvent la VIGNETTE du fournisseur : 264 pixels pour le
+ * morceau en cours, 500 pour un album. Posée sur une platine qui occupe
+ * 1 300 pixels d'un écran d'iPad, elle était agrandie cinq fois — d'où le flou
+ * pixelisé. Le CDN de Deezer sert pourtant la même image à la taille qu'on lui
+ * demande (jusqu'à 1 400) : il suffit de la lui demander, en réécrivant
+ * l'adresse. Et dans l'autre sens, une vignette de file de 44 pixels n'a que
+ * faire d'une image de 500 : une file de 235 titres en chargeait autant.
+ *
+ * Toute autre adresse est rendue telle quelle.
+ */
+const DEEZER =
+  /^(https:\/\/[^/]*dzcdn\.net\/images\/[a-z]+\/[0-9a-f-]+\/)\d+x\d+(-[0-9a-f]{6}-)\d+(-\d+-\d+\.(?:jpg|png))$/;
+
+/** L'image se sert-elle à la taille qu'on veut ? */
+export function isResizable(url: string | null): boolean {
+  return Boolean(url && DEEZER.test(url));
+}
+
+export function sharpen(url: string | null, pixels: number): string | null {
+  if (!url) return url;
+  const m = DEEZER.exec(url);
+  if (!m) return url;
+  const paliers = [120, 264, 500, 1000, 1400];
+  const taille = paliers.find((p) => p >= pixels) ?? 1400;
+  return `${m[1]}${taille}x${taille}${m[2]}80${m[3]}`;
+}
+
 /** Générateur pseudo-aléatoire reproductible, semé par une chaîne. */
 function seeded(seed: string): () => number {
   let h = 2166136261;

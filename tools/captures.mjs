@@ -377,6 +377,11 @@ await capturer("file");
   await sleep(600);
 }
 
+// 3 bis. Les actions d'une ligne : écouter ensuite, retirer.
+await evaluer(`document.querySelectorAll(".queue__item")[5]?.querySelector(".queue__more")?.click(), true`);
+await sleep(700);
+await capturer("file-actions");
+
 // 4. Les enceintes.
 await aller("?demo=1", 4200);
 await reveiller();
@@ -400,7 +405,7 @@ await aller("?demo=1&rest=1", 4200);
 await capturer("repos");
 
 // 8 bis. Les motifs du marbré calculés, un par un.
-for (const motif of ["tourbillon", "remous", "agate", "nebuleuse"]) {
+for (const motif of ["nebuleuse", "nuit", "brume", "aurore"]) {
   await aller(`?demo=1&vinyl=marble&motif=${motif}`, 4200);
   await capturer(`motif-${motif}`);
 }

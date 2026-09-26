@@ -30,11 +30,12 @@ import {
   type QueueView,
   type SearchResults,
 } from "./lib/library";
+import { isResizable, sharpen } from "./lib/covers";
 import { marbleMasks } from "./lib/marbling";
 import { MassLink } from "./lib/mass";
 import { haPrefs, localPrefs, type LibraryPrefs, type PrefsStore } from "./lib/prefs";
 import { NO_LYRICS, fetchLyrics, lineAt, parseLrc, type Lyrics } from "./lib/lyrics";
-import { NEUTRAL, extractPalette, type Palette } from "./lib/palette";
+import { NEUTRAL, extractPalette, rotateHue, type Palette } from "./lib/palette";
 import { formatTime, readPlayback, syncClock } from "./lib/position";
 import {
   baseUrl,
@@ -232,10 +233,53 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
 
   // ------------------------------------------------------------- pochette
 
-  const coverUrl = useMemo(
-    () => resolveImage({ haUrl, token }, attrs?.entity_picture),
-    [haUrl, token, attrs?.entity_picture],
+  /*
+   * L'image de l'entité est une vignette (264 pixels chez Deezer), et son
+   * adresse pointe droit sur le serveur de Music Assistant — en http, donc
+   * bloquée depuis une page en https. On prend d'abord le relais de Home
+   * Assistant (entity_picture_local), sur sa propre adresse ; puis, dès qu'on
+   * la connaît, l'image d'origine du fournisseur, à la taille de la platine.
+   */
+  const baseCover = useMemo(
+    () =>
+      resolveImage(
+        { haUrl, token },
+        (attrs?.entity_picture_local as string | undefined) || attrs?.entity_picture,
+      ),
+    [haUrl, token, attrs?.entity_picture, attrs?.entity_picture_local],
   );
+  const [hiRes, setHiRes] = useState<{ title: string; url: string } | null>(null);
+  useEffect(() => {
+    if (DEMO || !title) return;
+    let vivant = true;
+    // Le résumé de la file peut avoir un temps de retard sur l'entité : on
+    // retente deux fois avant de renoncer.
+    const essayer = async (reste: number) => {
+      try {
+        const url = await source()?.currentCover(title);
+        if (!vivant) return;
+        if (url && isResizable(url)) setHiRes({ title, url });
+        else if (reste > 0) setTimeout(() => vivant && void essayer(reste - 1), 1500);
+      } catch {
+        /* sans elle, la vignette fera l'affaire */
+      }
+    };
+    void essayer(2);
+    return () => {
+      vivant = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [title, entityId]);
+  /** Côté de la pochette de la platine à l'écran, en pixels physiques. */
+  const sleevePx = useMemo(
+    () =>
+      Math.min(window.innerHeight * 0.74, window.innerWidth * 0.44) *
+      1.04 *
+      (window.devicePixelRatio || 1),
+    [],
+  );
+  const coverUrl =
+    hiRes && hiRes.title === title ? sharpen(hiRes.url, sleevePx) : baseCover;
 
   useEffect(() => {
     if (!coverUrl) {
@@ -418,12 +462,18 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
      * est le comportement qu'on attend par défaut.
      */
     root.style.setProperty("--vinyl-tint", settings.vinylTint || palette.vivid);
+    // La seconde couleur de l'aurore : celle de la pochette, ou la première
+    // décalée si on a imposé une teinte à la main.
+    root.style.setProperty(
+      "--vinyl-tint-2",
+      settings.vinylTint ? rotateHue(settings.vinylTint, 50) : palette.vivid2,
+    );
   }, [palette, settings.vinylTint]);
 
   // ------------------------------------------------------------- motif du marbré
 
   /*
-   * Les motifs calculés (tourbillon, agate…) n'arrivent qu'une fois leurs
+   * Les motifs calculés (nébuleuse et ses variantes) n'arrivent qu'une fois leurs
    * masques prêts — une fraction de seconde la première fois, puis aussitôt.
    * D'ici là, le disque garde la coulée : jamais de disque nu.
    */
@@ -654,16 +704,23 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
    * tableau ou un rappel neuf à chaque fois relançait la boucle du bac.
    */
   const tabItems = libraryTab === "albums" ? albums : playlists;
-  const crateItems = useMemo(
-    () =>
-      results
-        ? // Une recherche montre tout : on cherche justement ce qu'on ne voit pas.
-          libraryTab === "albums"
-          ? [...results.albums, ...results.tracks]
-          : results.playlists
-        : tabItems.filter((i) => !hiddenSet.has(i.uri)),
-    [hiddenSet, libraryTab, results, tabItems],
-  );
+  const crateItems = useMemo(() => {
+    const liste = results
+      ? // Une recherche montre tout : on cherche justement ce qu'on ne voit pas.
+        libraryTab === "albums"
+        ? [...results.albums, ...results.tracks]
+        : results.playlists
+      : tabItems.filter((i) => !hiddenSet.has(i.uri));
+    /*
+     * Les pochettes du bac, à la taille où elles s'affichent : le fournisseur
+     * les donne en 500 pixels, un iPad les montre sur plus de 800.
+     */
+    const pixels =
+      Math.min(window.innerHeight * 0.72, window.innerWidth * 0.42) *
+      settings.libraryZoom *
+      (window.devicePixelRatio || 1);
+    return liste.map((i) => ({ ...i, image: sharpen(i.image, pixels) }));
+  }, [hiddenSet, libraryTab, results, settings.libraryZoom, tabItems]);
   const favorite = useMemo(() => playlists.find((p) => p.pinned) ?? null, [playlists]);
   const browsing = useRef({ tab: libraryTab, searching: false });
   browsing.current = { tab: libraryTab, searching: results !== null };
@@ -864,6 +921,53 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
    * le morceau, qui reçoit alors un nouvel identifiant de file.
    */
   const jumpUri = useRef<string | null>(null);
+
+  /**
+   * « Ensuite » : écouter ce morceau juste après celui en cours.
+   *
+   * Un morceau encore à venir est DÉPLACÉ à cette place — la même opération
+   * que le glisser, en un geste, et sans doublon. Un morceau déjà joué, qu'on
+   * ne peut plus déplacer, est remis dans la file juste après.
+   */
+  const playNextInQueue = useCallback(
+    async (index: number) => {
+      const item = queue.items[index];
+      if (!item || index === queue.current) return;
+      const cible = queue.locked + 1;
+      if (index > queue.locked) {
+        if (index !== cible) await moveInQueue(index, cible);
+        return;
+      }
+      try {
+        await source()?.playNext(item);
+      } catch (err) {
+        setQueueError(`Impossible : ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    [moveInQueue, queue, source],
+  );
+
+  const removeFromQueue = useCallback(
+    async (index: number) => {
+      const lib = source();
+      const item = queue.items[index];
+      if (!lib || !item || index <= queue.locked) return;
+      localEdit.current = performance.now();
+      setQueue((q) => ({
+        ...q,
+        items: q.items.filter((i) => i.id !== item.id),
+        total: Math.max(0, q.total - 1),
+      }));
+      try {
+        await lib.remove(item);
+      } catch (err) {
+        setQueueError(`Impossible de retirer ce morceau : ${err instanceof Error ? err.message : String(err)}`);
+        localEdit.current = 0;
+        void refreshQueue();
+      }
+    },
+    [queue.items, queue.locked, refreshQueue, source],
+  );
 
   useEffect(() => {
     if (queuePending === null) return;
@@ -1418,6 +1522,8 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
           pending={queuePending}
           onPick={(item) => void jumpTo(item)}
           onMove={(from, to) => void moveInQueue(from, to)}
+          onPlayNext={(index) => void playNextInQueue(index)}
+          onRemove={(index) => void removeFromQueue(index)}
           onSorting={(active) => {
             sorting.current = active;
             if (!active && refreshAfterSort.current) {

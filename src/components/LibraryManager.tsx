@@ -11,6 +11,7 @@
  */
 
 import { useMemo, useState } from "react";
+import { sharpen } from "../lib/covers";
 import type { Media } from "../lib/library";
 import type { LibraryTab } from "./Library";
 
@@ -108,7 +109,7 @@ export function LibraryManager({
             <li key={item.uri} className="manage__item" data-hidden={!visible}>
               <span
                 className="queue__art"
-                style={{ backgroundImage: item.image ? `url("${item.image}")` : undefined }}
+                style={{ backgroundImage: item.image ? `url("${sharpen(item.image, 120)}")` : undefined }}
               />
               <span className="sidepanel__text">
                 <b>{item.name}</b>

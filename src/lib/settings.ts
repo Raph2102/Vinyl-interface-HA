@@ -14,7 +14,8 @@ export type BackgroundStyle = "adaptive" | "subtle" | "neutral" | "dark";
  * Motif du marbré. « coulee » est le motif d'origine, peint par des filtres
  * SVG ; les autres sont calculés en coordonnées polaires (voir marbling.ts).
  */
-export type MarbleMotif = "coulee" | "tourbillon" | "remous" | "agate" | "nebuleuse";
+export type MarbleMotif = "coulee" | "nebuleuse" | "nuit" | "brume" | "aurore";
+const MOTIFS: MarbleMotif[] = ["coulee", "nebuleuse", "nuit", "brume", "aurore"];
 /** Comment on lance et arrête la lecture. */
 export type PlayControl = "arm" | "button";
 
@@ -127,7 +128,10 @@ export function loadSettings(): Settings {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) };
+    const lus = { ...DEFAULTS, ...(JSON.parse(raw) as Partial<Settings>) };
+    // Un motif retiré depuis (tourbillon, remous, agate) : retour à la coulée.
+    if (!MOTIFS.includes(lus.marbleMotif)) lus.marbleMotif = DEFAULTS.marbleMotif;
+    return lus;
   } catch {
     return { ...DEFAULTS };
   }

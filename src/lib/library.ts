@@ -93,6 +93,13 @@ export interface LibrarySource {
   jumpTo(item: QueueItem): Promise<void>;
   /** Décale un morceau de `shift` rangs dans la file (négatif : vers le haut). */
   move(item: QueueItem, shift: number): Promise<void>;
+  /**
+   * Remet un morceau déjà joué juste après celui en cours. Pour un morceau à
+   * venir, on le DÉPLACE (move) : pas de doublon dans la file.
+   */
+  playNext(item: QueueItem): Promise<void>;
+  /** Retire un morceau à venir de la file. */
+  remove(item: QueueItem): Promise<void>;
   /** Prévient quand la file change. Renvoie de quoi se désabonner. */
   watchQueue(onChange: () => void): () => void;
   /**
@@ -101,6 +108,12 @@ export interface LibrarySource {
    * calage est exact, là où une base communautaire doit deviner la version.
    */
   currentLyrics(title: string): Promise<string | null>;
+  /**
+   * L'adresse d'origine de la pochette du morceau en cours, telle que le
+   * fournisseur la sert — celle de l'entité est une vignette de 264 pixels.
+   * null si on ne la connaît pas, ou si la file parle d'un autre morceau.
+   */
+  currentCover(title: string): Promise<string | null>;
 }
 
 /** Morceaux déjà joués qu'on garde au-dessus du morceau en cours. */
@@ -317,12 +330,50 @@ export function haLibrary(
       });
     },
 
+    async playNext(item) {
+      if (!item.uri) throw new Error("Ce morceau n'a pas d'URI.");
+      if (mass?.connected && queueId) {
+        await mass.command("player_queues/play_media", {
+          queue_id: queueId,
+          media: [item.uri],
+          option: "next",
+        });
+        return;
+      }
+      await client.callService(
+        "music_assistant",
+        "play_media",
+        { media_id: item.uri, media_type: "track", enqueue: "next" },
+        entityId,
+      );
+    },
+
+    async remove(item) {
+      if (!mass || !queueId) throw new Error("Retirer un morceau demande la liaison Music Assistant.");
+      await mass.command("player_queues/delete_item", {
+        queue_id: queueId,
+        item_id_or_index: item.id,
+      });
+    },
+
     watchQueue(onChange) {
       if (!mass) return () => {};
       return mass.onEvent((event) => {
         if (!queueId || event.object_id !== queueId) return;
         if (event.event === "queue_items_updated" || event.event === "queue_updated") onChange();
       });
+    },
+
+    /*
+     * Le résumé de Home Assistant suffit : il donne l'image du morceau en cours
+     * — pas besoin du module Music Assistant.
+     */
+    async currentCover(title) {
+      if (!title) return null;
+      const resume = await summary();
+      const media = resume?.current_item?.media_item as Record<string, any> | undefined;
+      if (!media || normalize(String(media.name ?? "")) !== normalize(title)) return null;
+      return image(readImage(media) ?? readImage(media.album ?? {}));
     },
 
     async currentLyrics(title) {
@@ -801,12 +852,29 @@ export function demoLibrary(client: PlayerClient, entityId: string): LibrarySour
       prevenir();
     },
 
+    async playNext(item) {
+      const copie = { ...item, id: `${item.id}-ensuite-${Date.now()}` };
+      file = [...file.slice(0, courant + 1), copie, ...file.slice(courant + 1)];
+      prevenir();
+    },
+
+    async remove(item) {
+      const rang = file.findIndex((f) => f.id === item.id);
+      if (rang <= courant) return;
+      file = file.filter((f) => f.id !== item.id);
+      prevenir();
+    },
+
     watchQueue(onChange) {
       abonnes.add(onChange);
       return () => abonnes.delete(onChange);
     },
 
     async currentLyrics() {
+      return null;
+    },
+
+    async currentCover() {
       return null;
     },
   };

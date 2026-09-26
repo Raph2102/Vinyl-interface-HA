@@ -1,14 +1,17 @@
 /**
  * Motifs de marbré, calculés comme la matière se forme sous la presse.
  *
- * Le marbré d'origine (« coulée ») dépose la couleur par des taches de
- * turbulence : juste, mais des taches sans direction. Un vrai vinyle marbré se
- * presse à partir d'une galette de pâtes mêlées, écrasée en tournant : les
- * veines s'étirent en ARCS autour du centre. D'où un calcul en coordonnées
- * polaires — le bruit est échantillonné sur un cercle de petit rayon, si bien
- * qu'il varie lentement avec l'angle (des traînées longues) et vite avec la
- * distance au centre (plusieurs anneaux), le tout tordu par un second bruit
- * pour que rien ne soit régulier.
+ * Un vrai vinyle marbré se presse à partir d'une galette de pâtes mêlées,
+ * écrasée en tournant : la couleur s'étire en volutes autour du centre. D'où un
+ * calcul en coordonnées polaires — le bruit est échantillonné sur un cercle de
+ * petit rayon, si bien qu'il varie lentement avec l'angle et plus vite avec la
+ * distance au centre, le tout tordu par un second bruit pour que rien ne soit
+ * régulier.
+ *
+ * Il y a eu des motifs à veines nettes (tourbillon, remous, agate) : jugés
+ * ratés, ils sont partis. Restent la nébuleuse, la préférée, et ses variantes :
+ * nuit (sur fond sombre, piquée d'étoiles), brume (pâle et douce), aurore
+ * (deux couleurs de la pochette qui s'entremêlent).
  *
  * Trois masques sortent de chaque motif : la couleur, une veine sombre, une
  * veine claire. Ils ne dépendent PAS de la teinte — la couleur est posée par le
@@ -32,7 +35,20 @@ export interface MarbleMasks {
 const SIZE = 640;
 /** Budget d'une tranche de calcul, en millisecondes. */
 const SLICE = 10;
-const STORE = "mdvinyl.marble.v1.";
+const STORE = "mdvinyl.marble.v2.";
+
+/*
+ * Les masques des motifs retirés (et de l'ancienne version) dorment encore
+ * dans le navigateur, une centaine de kilo-octets chacun : on fait le ménage
+ * une fois.
+ */
+try {
+  for (const cle of Object.keys(localStorage)) {
+    if (cle.startsWith("mdvinyl.marble.") && !cle.startsWith(STORE)) localStorage.removeItem(cle);
+  }
+} catch {
+  /* stockage indisponible : rien à nettoyer */
+}
 
 const memoire = new Map<MarbleMotif, Promise<MarbleMasks>>();
 
@@ -69,6 +85,7 @@ async function charger(motif: Exclude<MarbleMotif, "coulee">): Promise<MarbleMas
 async function calculer(motif: Exclude<MarbleMotif, "coulee">): Promise<MarbleMasks> {
   const bruit = perlin(7);
   const torsion = perlin(31);
+  const second = perlin(53);
   const couleur = new Uint8ClampedArray(SIZE * SIZE * 4);
   const sombre = new Uint8ClampedArray(SIZE * SIZE * 4);
   const clair = new Uint8ClampedArray(SIZE * SIZE * 4);
@@ -80,7 +97,7 @@ async function calculer(motif: Exclude<MarbleMotif, "coulee">): Promise<MarbleMa
       for (let i = 0; i < SIZE; i++) {
         const x = (i / SIZE) * 2 - 1;
         const y = (j / SIZE) * 2 - 1;
-        const [c, d, l] = pixel(motif, x, y, i, j, bruit, torsion);
+        const [c, d, l] = pixel(motif, x, y, i, j, bruit, torsion, second);
         const k = (j * SIZE + i) * 4 + 3;
         couleur[k] = c * 255;
         sombre[k] = d * 255;
@@ -101,7 +118,11 @@ async function calculer(motif: Exclude<MarbleMotif, "coulee">): Promise<MarbleMa
 
 type Bruit = (x: number, y: number, z: number) => number;
 
-/** Couleur, veine sombre, veine claire — chacune entre 0 et 1. */
+/**
+ * Trois couches, chacune entre 0 et 1 : la couleur, une seconde couche (plus
+ * sombre, plus claire, ou d'une autre couleur selon le motif — c'est le CSS qui
+ * la peint), et les paillettes.
+ */
 function pixel(
   motif: Exclude<MarbleMotif, "coulee">,
   x: number,
@@ -110,49 +131,50 @@ function pixel(
   j: number,
   n: Bruit,
   m: Bruit,
+  q: Bruit,
 ): [number, number, number] {
   const r = Math.hypot(x, y);
   const th = Math.atan2(y, x);
   const w = fbm(m, x * 1.7 + 3.1, y * 1.7 - 2.2, 0.5, 4);
 
   /*
-   * Traînées autour du centre : le bruit parcourt un cercle de rayon `cr`
-   * (petit = traînées longues), `rf` anneaux du centre au bord, une torsion
-   * qui fait spiraler, et un seuil net pour que les pâtes ne se mélangent pas.
+   * Des volutes autour du centre : `rf` fixe combien on en croise du centre au
+   * bord, `cr` leur longueur (petit = longues traînées), `tw` la torsion qui
+   * les fait spiraler, `warp` combien le second bruit les dérange.
    */
-  const trainees = (rf: number, cr: number, twist: number, warp: number, seuil: number, fondu: number) => {
-    const angle = th + r * twist + w * warp;
-    const v = fbm(n, r * rf + w * 1.3, Math.cos(angle) * cr, Math.sin(angle) * cr + 4.4, 6);
-    return [
-      lisse(seuil - fondu, seuil + fondu, v),
-      (1 - lisse(0, 0.022, Math.abs(v - (seuil + 0.16)))) * 0.9,
-      1 - lisse(0, 0.02, Math.abs(v - (seuil - 0.18))),
-    ] as [number, number, number];
+  const volutes = (b: Bruit, rf: number, cr: number, tw: number, warp: number, z: number) => {
+    const angle = th + r * tw + w * warp;
+    return fbm(b, r * rf + w * 0.9, Math.cos(angle) * cr, Math.sin(angle) * cr + z, 6);
+  };
+  /** Une paillette sur mille environ, placée au hasard mais toujours au même endroit. */
+  const paillette = (seuil: number) => {
+    const h = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453;
+    return h - Math.floor(h) > seuil ? 1 : 0;
   };
 
   switch (motif) {
-    // Fines traînées serrées, comme un « swirl » de pressage.
-    case "tourbillon":
-      return trainees(9, 0.4, 4, 1.6, 0.02, 0.02);
-    // Les mêmes pâtes, en masses plus larges et plus tordues.
-    case "remous":
-      return trainees(5, 0.35, 2, 2.4, -0.02, 0.03);
-    // Des bandes concentriques ondulées, comme une pierre d'agate tranchée.
-    case "agate": {
-      const b = r * 5.5 + w * 1.6 + fbm(n, x * 2.5, y * 2.5, 1.3, 4) * 0.6;
-      const f = b - Math.floor(b);
-      return [
-        lisse(0.08, 0.14, f) * (1 - lisse(0.52, 0.58, f)),
-        (1 - lisse(0, 0.035, Math.abs(f - 0.6))) * 0.8,
-        (1 - lisse(0, 0.03, Math.abs(f - 0.8))) * 0.9,
-      ];
-    }
-    // Des volutes douces, piquées de quelques paillettes.
+    // Des volutes douces, piquées de quelques paillettes. Le motif préféré :
+    // on n'y touche pas.
     case "nebuleuse": {
-      const angle = th + r * 1.8 + w * 0.8;
-      const v = fbm(n, r * 3 + w * 0.9, Math.cos(angle) * 0.5, Math.sin(angle) * 0.5 + 9.1, 6);
-      const h = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453;
-      return [lisse(-0.22, 0.28, v) * 0.95, lisse(0.12, 0.4, v) * 0.7, h - Math.floor(h) > 0.997 ? 1 : 0];
+      const v = volutes(n, 3, 0.5, 1.8, 0.8, 9.1);
+      return [lisse(-0.22, 0.28, v) * 0.95, lisse(0.12, 0.4, v) * 0.7, paillette(0.997)];
+    }
+    // La même, sur fond de nuit : la couleur luit, ses cœurs s'éclairent, et
+    // la poussière d'étoiles est plus dense.
+    case "nuit": {
+      const v = volutes(n, 3, 0.5, 2.2, 0.9, 9.1);
+      return [lisse(-0.3, 0.3, v), lisse(0.1, 0.42, v) * 0.85, paillette(0.994)];
+    }
+    // Plus large, plus pâle, presque sans paillettes : une brume de couleur.
+    case "brume": {
+      const v = volutes(n, 1.8, 0.35, 1.2, 0.6, 9.1);
+      return [lisse(-0.35, 0.35, v) * 0.75, lisse(0.2, 0.5, v) * 0.35, paillette(0.9985)];
+    }
+    // Deux nébuleuses qui s'entremêlent, chacune de sa couleur.
+    case "aurore": {
+      const v = volutes(n, 3, 0.5, 1.8, 0.8, 9.1);
+      const u = volutes(q, 3.3, 0.5, 2.4, 1, 3.3);
+      return [lisse(-0.2, 0.25, v) * 0.95, lisse(-0.05, 0.3, u) * 0.9, paillette(0.997)];
     }
   }
 }

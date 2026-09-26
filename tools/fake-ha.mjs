@@ -990,6 +990,21 @@ function musicAssistant(req, socket) {
 
         case "player_queues/play_media": {
           const media = Array.isArray(a.media) ? a.media : [a.media];
+          /*
+           * « next » : les morceaux s'insèrent juste après celui en cours, la
+           * suite est conservée. C'est le chemin d'un morceau déjà joué qu'on
+           * veut réentendre ensuite.
+           */
+          if (a.option === "next" && media.length > 0) {
+            const copies = media.map((uri) => {
+              const connu = file.find((t) => t.uri === uri);
+              return { ...(connu ?? { title: `Piste ${uri}`, artist: "?", album: "?", duration: 200, image: null }), id: randomUUID().replace(/-/g, ""), uri };
+            });
+            file.splice(rangCourant + 1, 0, ...copies);
+            repondre(msg.message_id, null);
+            setTimeout(() => annoncer("queue_items_updated"), 100);
+            break;
+          }
           if (a.option !== "replace" || media.length === 0) {
             erreur(msg.message_id, "option non prise en charge par le faux serveur");
             break;
@@ -1011,6 +1026,26 @@ function musicAssistant(req, socket) {
           pousserEtat?.();
           repondre(msg.message_id, null);
           setTimeout(() => annoncer("queue_items_updated"), 100);
+          break;
+        }
+
+        // Même refus que le vrai : ce qui est déjà parti vers l'enceinte reste.
+        case "player_queues/delete_item": {
+          const rang =
+            typeof a.item_id_or_index === "number"
+              ? a.item_id_or_index
+              : file.findIndex((t) => t.id === a.item_id_or_index);
+          if (rang < 0) {
+            erreur(msg.message_id, "item not found");
+            break;
+          }
+          if (rang <= rangCourant) {
+            erreur(msg.message_id, `${rang} is already played/buffered`);
+            break;
+          }
+          file.splice(rang, 1);
+          repondre(msg.message_id, null);
+          annoncer("queue_items_updated");
           break;
         }
 

@@ -21,6 +21,12 @@ export interface Palette {
    * marbré ressemblait alors à des nuages sales.
    */
   vivid: string;
+  /**
+   * Une seconde couleur vive, d'une autre teinte : celle qui s'entremêle à la
+   * première dans le marbré « aurore ». À défaut sur la pochette, la première
+   * décalée sur le cercle des couleurs.
+   */
+  vivid2: string;
   /** Couleur de texte lisible par-dessus. */
   text: string;
   isDark: boolean;
@@ -30,6 +36,7 @@ export const NEUTRAL: Palette = {
   a: "hsl(220 4% 46%)",
   b: "hsl(220 5% 34%)",
   vivid: "hsl(24 55% 45%)",
+  vivid2: "hsl(334 50% 52%)",
   deep: "hsl(220 6% 14%)",
   text: "hsl(0 0% 100%)",
   isDark: true,
@@ -163,10 +170,23 @@ function analyse(img: HTMLImageElement): Palette {
       ? hsl(vive.h, Math.min(vive.s, 0.05), 0.2)
       : hsl(vive.h, clamp(Math.max(vive.s, 0.55), 0.55, 0.85), clamp(vive.l, 0.4, 0.56));
 
+  const vive2 = [...candidates]
+    .filter(
+      (c) =>
+        c !== vive && c.count >= seuil && c.s >= 0.25 && c.l > 0.15 && c.l < 0.88 && hueDistance(c.h, vive.h) > 45,
+    )
+    .sort((x, y) => vivacite(y) - vivacite(x))[0];
+  const vivid2 = vive2
+    ? hsl(vive2.h, clamp(Math.max(vive2.s, 0.5), 0.5, 0.85), clamp(vive2.l, 0.42, 0.6))
+    : vive.s < 0.12
+      ? hsl(vive.h, 0.04, 0.55)
+      : hsl((vive.h + 50) % 360, clamp(Math.max(vive.s, 0.5), 0.5, 0.8), clamp(vive.l + 0.06, 0.45, 0.6));
+
   return {
     a,
     b,
     vivid,
+    vivid2,
     deep: hsl(first.h, clamp(first.s * 0.55, 0.08, 0.4), 0.13),
     text: "hsl(0 0% 100%)",
     isDark,
@@ -215,4 +235,19 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   else h = ((r - g) / d + 4) * 60;
 
   return [h, s, l];
+}
+
+/**
+ * Décale la teinte d'une couleur choisie à la main (« #rrggbb » ou « hsl(…) ») :
+ * la seconde couleur de l'aurore quand on a imposé la première.
+ */
+export function rotateHue(couleur: string, degres: number): string {
+  const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(couleur.trim());
+  if (hex) {
+    const [h, s, l] = rgbToHsl(parseInt(hex[1]!, 16), parseInt(hex[2]!, 16), parseInt(hex[3]!, 16));
+    return hsl((h + degres + 360) % 360, s, l);
+  }
+  const m = /^hsl\(\s*([\d.]+)(?:deg)?[\s,]+([\d.]+)%[\s,]+([\d.]+)%/i.exec(couleur.trim());
+  if (m) return `hsl(${(Number(m[1]) + degres + 360) % 360} ${m[2]}% ${m[3]}%)`;
+  return couleur;
 }

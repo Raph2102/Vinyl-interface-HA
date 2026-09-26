@@ -492,7 +492,7 @@ button {
 }
 
 /*
- * Motifs calculés (tourbillon, remous, agate, nébuleuse) : leurs masques sont
+ * Motifs calculés (nébuleuse, nuit, brume, aurore) : leurs masques sont
  * produits par marbling.ts et arrivent par des variables. L'attribut
  * data-marble n'est posé qu'une fois les masques prêts ; avant, c'est la
  * coulée ci-dessus qui s'affiche.
@@ -529,6 +529,53 @@ button {
   mask-image: var(--marble-light);
   -webkit-mask-size: 100% 100%;
   mask-size: 100% 100%;
+  opacity: 0.85;
+}
+
+/*
+ * Les variantes de la nébuleuse ne changent que la peinture : mêmes couches,
+ * autres couleurs.
+ */
+
+/* Nuit : une pâte presque noire, la couleur qui luit, des cœurs plus clairs,
+   et la poussière d'étoiles. */
+.app[data-vinyl="marble"][data-marble="nuit"] .disc__material {
+  background: radial-gradient(circle at 34% 24%, #26272c 0%, #141519 50%, #0b0b0e 100%);
+}
+
+.app[data-vinyl="marble"][data-marble="nuit"] .disc__pattern::before {
+  background: color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 85%, #000000);
+  opacity: 0.95;
+}
+
+.app[data-vinyl="marble"][data-marble="nuit"] .disc__pattern::after {
+  background: color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 55%, #ffffff);
+  opacity: 0.8;
+}
+
+.app[data-vinyl="marble"][data-marble="nuit"] .disc__veins {
+  background: #ffffff;
+  opacity: 0.95;
+}
+
+/* Brume : la couleur éclaircie, un cœur à peine plus soutenu. */
+.app[data-vinyl="marble"][data-marble="brume"] .disc__pattern::before {
+  background: color-mix(in oklab, var(--vinyl-tint, hsl(24 55% 45%)) 60%, #ffffff);
+}
+
+.app[data-vinyl="marble"][data-marble="brume"] .disc__pattern::after {
+  background: var(--vinyl-tint, hsl(24 55% 45%));
+  opacity: 0.6;
+}
+
+.app[data-vinyl="marble"][data-marble="brume"] .disc__veins {
+  background: #ffffff;
+  opacity: 0.7;
+}
+
+/* Aurore : la seconde couche prend la seconde couleur de la pochette. */
+.app[data-vinyl="marble"][data-marble="aurore"] .disc__pattern::after {
+  background: color-mix(in oklab, var(--vinyl-tint-2, hsl(334 50% 52%)) 92%, #ffffff);
   opacity: 0.85;
 }
 
@@ -2501,11 +2548,98 @@ button {
 
 .queue__item {
   position: relative;
-  display: flex;
-  align-items: center;
+  /* Les actions attendent derrière la ligne : ce qui déborde ne se voit pas. */
+  overflow: hidden;
   border-radius: 12px;
   /* Un appui long sert à prendre la ligne : pas de bulle de copie d'iOS. */
   -webkit-touch-callout: none;
+}
+
+.queue__row {
+  display: flex;
+  align-items: center;
+}
+
+/*
+ * Les actions glissent depuis le bord droit, PAR-DESSUS la durée et la
+ * poignée : la ligne ne bouge pas, et son titre reste lisible — on voit sur
+ * quel morceau on agit.
+ */
+.queue__tray {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  width: var(--tray, 0px);
+  border-radius: 0 12px 12px 0;
+  overflow: hidden;
+  box-shadow: -10px 0 18px hsl(220 10% 6% / 0.55);
+  transform: translateX(100%);
+  transition: transform 0.26s var(--ease-out);
+}
+
+.queue__item[data-open="true"] .queue__tray {
+  transform: none;
+}
+
+.queue__action {
+  flex: 1;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: hsl(0 0% 100%);
+}
+
+.queue__action svg {
+  width: 20px;
+  height: 20px;
+}
+
+.queue__action--next {
+  background: hsl(212 70% 46%);
+}
+
+.queue__action--remove {
+  background: hsl(3 64% 48%);
+}
+
+/* Les trois points : l'autre porte vers les mêmes actions, pour qui ne glisse pas. */
+.queue__more {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 44px;
+  color: var(--ink-faint);
+  border-radius: 10px;
+  transition: color 0.16s var(--ease-soft), background 0.16s var(--ease-soft);
+}
+
+.queue__more:hover,
+.queue__more[aria-expanded="true"] {
+  color: var(--ink);
+  background: hsl(0 0% 100% / 0.06);
+}
+
+.queue__more svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Le morceau qu'on vient d'envoyer « ensuite » : un éclair pour le retrouver. */
+@keyframes queue-flash {
+  from {
+    background: hsl(212 80% 60% / 0.32);
+  }
+}
+
+.queue__item[data-flash="true"] {
+  animation: queue-flash 1.4s var(--ease-soft);
 }
 
 /* Toute la ligne est le bouton : sur une tablette, une cible de 44 px de haut

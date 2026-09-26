@@ -651,6 +651,126 @@ verifier(
   `ligne 4 : « ${ordre[4]} »`,
 );
 
+// ------------------------------------------------ 4 ter. écouter ensuite, retirer
+
+console.log("\n-- écouter ensuite, retirer --");
+
+const lignes = async () =>
+  JSON.parse(
+    await evaluer(`JSON.stringify([...document.querySelectorAll(".queue__item")].map((l) => ({
+      titre: l.querySelector("b").textContent,
+      id: l.dataset.id,
+      ouverte: l.dataset.open === "true",
+      eclair: l.dataset.flash === "true",
+      actions: [...l.querySelectorAll(".queue__action span")].map((s) => s.textContent),
+      points: !!l.querySelector(".queue__more"),
+    })))`),
+  );
+const commandes = async (nom) => (await journalMA()).filter((m) => m.command === nom);
+const troisPoints = (i) =>
+  evaluer(`document.querySelectorAll(".queue__item")[${i}].querySelector(".queue__more")?.click(), true`);
+const action = (i, libelle) =>
+  evaluer(`[...document.querySelectorAll(".queue__item")[${i}].querySelectorAll(".queue__action")].find((b) => b.textContent.includes(${JSON.stringify(libelle)}))?.click(), true`);
+
+let avantAction = await lignes();
+const enCours = avantAction.findIndex((_, i) => i === 3);
+verifier("le morceau en cours n'a pas de ⋯", enCours === 3 && avantAction[3].points === false);
+
+await troisPoints(6);
+await sleep(400);
+let apresAction = await lignes();
+verifier(
+  "⋯ découvre « Ensuite » et « Retirer » sur un morceau à venir",
+  apresAction[6].ouverte && apresAction[6].actions.join("|") === "Ensuite|Retirer",
+  apresAction[6].actions.join(" / "),
+);
+
+let mouvements = (await commandes("player_queues/move_item")).length;
+await action(6, "Ensuite");
+await sleep(900);
+apresAction = await lignes();
+const deplace = (await commandes("player_queues/move_item")).pop();
+verifier(
+  "« Ensuite » place le morceau juste après celui en cours, sans le traîner",
+  apresAction[4].titre === avantAction[6].titre && deplace?.args?.pos_shift === -2 &&
+    (await commandes("player_queues/move_item")).length === mouvements + 1,
+  `rang 4 : « ${apresAction[4].titre} », décalage ${deplace?.args?.pos_shift}`,
+);
+verifier("sans doublon : la file garde sa longueur", apresAction.length === avantAction.length, `${apresAction.length} morceaux`);
+verifier("les actions se referment après usage", apresAction.every((l) => !l.ouverte));
+verifier(
+  "le morceau déjà « ensuite » ne propose plus que « Retirer »",
+  apresAction[4].actions.join("|") === "Retirer",
+  apresAction[4].actions.join(" / "),
+);
+
+// Glisser la ligne vers la gauche découvre les mêmes actions.
+const boiteLigne = JSON.parse(
+  await evaluer(`JSON.stringify((() => { const r = document.querySelectorAll(".queue__item")[7].querySelector(".queue__pick").getBoundingClientRect(); return { x: r.left + r.width * 0.6, y: r.top + r.height / 2 }; })())`),
+);
+{
+  const souris = (type, x, buttons) =>
+    envoyer("Input.dispatchMouseEvent", { type, x, y: boiteLigne.y, button: "left", buttons, clickCount: type === "mouseMoved" ? 0 : 1 });
+  await souris("mousePressed", boiteLigne.x, 1);
+  for (let k = 1; k <= 10; k++) {
+    await souris("mouseMoved", boiteLigne.x - 16 * k, 1);
+    await sleep(20);
+  }
+  await souris("mouseReleased", boiteLigne.x - 160, 0);
+}
+await sleep(500);
+avantAction = await lignes();
+verifier("glisser une ligne vers la gauche découvre ses actions", avantAction[7].ouverte === true);
+verifier(
+  "le glissement ne saute pas sur le morceau",
+  (await commandes("player_queues/play_index")).length === 1,
+);
+
+await action(7, "Retirer");
+await sleep(900);
+apresAction = await lignes();
+const retrait = (await commandes("player_queues/delete_item")).pop();
+verifier(
+  "« Retirer » enlève le morceau de la file chez Music Assistant",
+  apresAction.length === avantAction.length - 1 && !apresAction.some((l) => l.id === avantAction[7].id) &&
+    retrait?.args?.item_id_or_index === avantAction[7].id,
+  `${apresAction.length} morceaux, ${JSON.stringify(retrait?.args ?? null)}`,
+);
+verifier(
+  "l'en-tête suit",
+  (await evaluer(`document.querySelector(".queue h2 small")?.textContent ?? ""`)).startsWith(`${apresAction.length} titres`),
+);
+
+// Un morceau déjà joué : on ne peut plus le déplacer, on le rejoue ensuite.
+avantAction = await lignes();
+await troisPoints(1);
+await sleep(300);
+verifier(
+  "un morceau déjà joué propose « Ensuite », pas « Retirer »",
+  (await lignes())[1].actions.join("|") === "Ensuite",
+  (await lignes())[1].actions.join(" / "),
+);
+await action(1, "Ensuite");
+await sleep(1100);
+apresAction = await lignes();
+const remis = (await commandes("player_queues/play_media")).pop();
+verifier(
+  "il est remis juste après le morceau en cours (play_media « next »)",
+  remis?.args?.option === "next" && apresAction[4]?.titre === avantAction[1].titre && apresAction.length === avantAction.length + 1,
+  `rang 4 : « ${apresAction[4]?.titre} », ${JSON.stringify(remis?.args ?? null)}`,
+);
+
+// Des actions ouvertes : toucher une autre ligne les referme, sans sauter.
+await troisPoints(5);
+await sleep(300);
+const sauts = (await commandes("player_queues/play_index")).length;
+await evaluer(`document.querySelectorAll(".queue__item")[6].querySelector(".queue__pick").click(), true`);
+await sleep(500);
+verifier(
+  "toucher ailleurs referme les actions sans sauter sur un morceau",
+  (await lignes()).every((l) => !l.ouverte) && (await commandes("player_queues/play_index")).length === sauts,
+);
+
 await evaluer("document.querySelector('[aria-label=\"Fermer la file\"]')?.click()");
 await sleep(400);
 

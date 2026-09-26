@@ -91,9 +91,17 @@ aller ; on le **prend par sa poignée** (les trois barres, à droite) ou par un
 **appui long**, et on le pose où l'on veut. Les autres s'écartent pour lui faire
 place, et la liste se met à jour toute seule quand la file change ailleurs.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file-deplacer.jpg" alt="Un morceau déplacé dans la file" />
-</p>
+Pour écouter un morceau **juste après** celui en cours sans le traîner jusque-là,
+on **glisse sa ligne vers la gauche** — ou on touche ses trois petits points :
+**Ensuite** le place là, **Retirer** l'enlève de la file. Un morceau déjà joué
+se réécoute ensuite de la même façon.
+
+<table>
+  <tr>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file-deplacer.jpg" alt="Un morceau déplacé dans la file" /><p align="center">Déplacer un morceau</p></td>
+    <td width="50%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/file-actions.jpg" alt="Les actions d'un morceau : ensuite, retirer" /><p align="center">L'écouter ensuite, ou le retirer</p></td>
+  </tr>
+</table>
 
 ---
 
@@ -139,6 +147,7 @@ place, et la liste se met à jour toute seule quand la file change ailleurs.
 | **Balayer** horizontalement | Morceau précédent / suivant |
 | **Toucher la pochette** | La faire passer devant le disque |
 | **Tenir la poignée ≡** d'un morceau, ou **appuyer longuement** dessus | Le déplacer dans la file |
+| **Glisser** un morceau de la file **vers la gauche**, ou toucher **⋯** | L'écouter ensuite, ou le retirer |
 | Flèches ↑ ↓ sur une poignée | Déplacer le morceau d'un rang, au clavier |
 | Ne rien faire quatre secondes | Les commandes s'effacent |
 
@@ -162,16 +171,16 @@ dans le brun gris, un pigment de vinyle jamais.
   </tr>
 </table>
 
-Le marbré se décline en **cinq motifs**. Au motif d'origine s'ajoutent quatre
-motifs calculés comme la matière se forme sous la presse : une galette de pâtes
-mêlées, écrasée en tournant, dont les veines s'étirent en arcs autour du centre.
+Le marbré se décline en **cinq motifs** : la coulée d'origine, et la
+**nébuleuse** avec ses variantes — des volutes calculées comme la matière se
+forme sous la presse, une galette de pâtes mêlées écrasée en tournant.
 
 <table>
   <tr>
-    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-tourbillon.jpg" alt="Tourbillon" /><p align="center"><b>Tourbillon</b></p></td>
-    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-remous.jpg" alt="Remous" /><p align="center"><b>Remous</b></p></td>
-    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-agate.jpg" alt="Agate" /><p align="center"><b>Agate</b></p></td>
     <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-nebuleuse.jpg" alt="Nébuleuse" /><p align="center"><b>Nébuleuse</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-nuit.jpg" alt="Nuit" /><p align="center"><b>Nuit</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-brume.jpg" alt="Brume" /><p align="center"><b>Brume</b></p></td>
+    <td width="25%"><img src="https://raw.githubusercontent.com/Raph2102/Vinyl-interface-HA/main/docs/images/motif-aurore.jpg" alt="Aurore" /><p align="center"><b>Aurore</b></p></td>
   </tr>
 </table>
 
@@ -253,6 +262,12 @@ c'est par le superviseur que passe la liaison. Ailleurs — Music Assistant en
 Docker, par exemple — la file montre le morceau en cours et le suivant, et le
 dit. La lecture à l'envers passe par la même liaison ; sans elle, on lit dans
 l'ordre.
+
+**Les pochettes viennent du fournisseur, à la taille de l'écran.** Music
+Assistant ne garde souvent qu'une vignette (264 pixels pour le morceau en
+cours) ; la platine redemande l'image au fournisseur à la taille où elle
+s'affiche, jusqu'à 1 400 pixels chez Deezer, et des vignettes plus petites là où
+elles le sont.
 
 **Les pochettes viennent du fournisseur.** Elles sont chargées depuis son CDN et
 lues dans un canvas pour en extraire les couleurs du fond adaptatif — ce qui

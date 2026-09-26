@@ -9,10 +9,15 @@
  * y aller. Et chaque morceau à venir se déplace — par sa poignée à trois
  * barres, ou par un appui long n'importe où sur la ligne, comme dans les
  * listes d'iOS et d'Android.
+ *
+ * Un glissement vers la gauche, ou le bouton ⋯, découvre les actions de la
+ * ligne : « Ensuite », pour l'écouter juste après le morceau en cours sans
+ * avoir à la traîner jusque-là, et « Retirer ».
  */
 
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { sharpen } from "../lib/covers";
 import type { QueueItem } from "../lib/library";
 import { formatTime } from "../lib/position";
 
@@ -33,6 +38,10 @@ interface QueueProps {
   pending: string | null;
   onPick: (item: QueueItem) => void;
   onMove: (from: number, to: number) => void;
+  /** Faire jouer ce morceau juste après celui en cours. */
+  onPlayNext: (index: number) => void;
+  /** Retirer ce morceau de la file. */
+  onRemove: (index: number) => void;
   /** Prévient quand une ligne est prise, puis lâchée. */
   onSorting?: (active: boolean) => void;
   onClose: () => void;
@@ -44,6 +53,10 @@ const LONG_PRESS = 380;
 const SLOP = 8;
 /** Bande, en haut et en bas de la liste, où la liste défile d'elle-même. */
 const EDGE = 56;
+/** Largeur d'un bouton d'action découvert par le glissement. */
+const ACTION_W = 84;
+
+type Action = "next" | "remove";
 
 interface Drag {
   from: number;
@@ -70,6 +83,8 @@ export function Queue({
   pending,
   onPick,
   onMove,
+  onPlayNext,
+  onRemove,
   onSorting,
   onClose,
 }: QueueProps) {
@@ -80,6 +95,40 @@ export function Queue({
   const placed = useRef(false);
 
   const movable = (index: number) => full && index > locked && index < items.length;
+  /** Ligne dont les actions sont découvertes. */
+  const [openId, setOpenId] = useState<string | null>(null);
+  /** Ligne qui vient de bouger par une action : un éclair pour la retrouver. */
+  const [flash, setFlash] = useState<string | null>(null);
+
+  /**
+   * Ce qu'on peut faire d'une ligne. Rien pour le morceau en cours ; « Ensuite »
+   * pour toutes les autres, sauf celle qui l'est déjà ; « Retirer » pour ce
+   * qui n'est pas encore parti vers l'enceinte.
+   */
+  const actionsOf = (index: number): Action[] => {
+    const item = items[index];
+    if (!full || !item || index === current || item.id === pending) return [];
+    const liste: Action[] = [];
+    if (index !== locked + 1) liste.push("next");
+    if (index > locked) liste.push("remove");
+    return liste;
+  };
+
+  const agir = (action: Action, index: number, item: QueueItem) => {
+    setOpenId(null);
+    setFlash(item.id);
+    window.setTimeout(() => setFlash((f) => (f === item.id ? null : f)), 1500);
+    if (action === "next") onPlayNext(index);
+    else onRemove(index);
+    // Le morceau remonte : on le suit des yeux.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() =>
+        listRef.current
+          ?.querySelector<HTMLElement>(`[data-id="${CSS.escape(item.id)}"]`)
+          ?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+      ),
+    );
+  };
 
   // Les mesures et les mouvements sont écrits à la main : pendant le geste, React
   // ne redessine rien, et la liste reste fluide même longue.
@@ -125,6 +174,7 @@ export function Queue({
       raf: 0,
     };
     drag.current = d;
+    setOpenId(null);
     onSorting?.(true);
     list.dataset.sorting = "true";
     row.dataset.lifted = "true";
@@ -190,34 +240,90 @@ export function Queue({
       delete row.dataset.lifted;
       delete list.dataset.sorting;
       onSorting?.(false);
+      swallowClick.current = false;
       requestAnimationFrame(() => requestAnimationFrame(() => delete list.dataset.settling));
     }, 150);
   };
 
-  /** Appui long sur la ligne : une prise, pas un saut ni un défilement. */
+  /**
+   * Toucher une ligne. Trois gestes s'y distinguent dès les premiers pixels :
+   *  - vers la gauche, franchement horizontal : on découvre les actions ;
+   *  - immobile un instant : on prend la ligne pour la déplacer ;
+   *  - vertical : on fait défiler — la liste s'en charge, on se retire.
+   * Un simple toucher reste un saut sur le morceau.
+   */
   const press = (index: number, e: React.PointerEvent) => {
-    if (!movable(index) || (e.pointerType === "mouse" && e.button !== 0)) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const item = items[index];
+    const ligne = (e.currentTarget as HTMLElement).closest<HTMLElement>(".queue__item");
+    // Ce sont les ACTIONS qui glissent depuis le bord, pas la ligne : le titre
+    // reste lisible, on voit sur quel morceau on agit.
+    const tiroir = ligne?.querySelector<HTMLElement>(".queue__tray") ?? null;
+    const largeur = actionsOf(index).length * ACTION_W;
+    const peutGlisser = largeur > 0 && tiroir !== null;
+    const peutPrendre = movable(index);
+    if (!item || (!peutGlisser && !peutPrendre)) return;
+
     const x0 = e.clientX;
     const y0 = e.clientY;
     let y = y0;
-    const timer = window.setTimeout(() => {
-      cleanup();
-      swallowClick.current = true;
-      start(index, y);
-    }, LONG_PRESS);
+    let glisse = false;
+    const depart = openId === item.id ? -largeur : 0;
+    let decalage = depart;
+
+    const timer = peutPrendre
+      ? window.setTimeout(() => {
+          cleanup();
+          swallowClick.current = true;
+          start(index, y);
+        }, LONG_PRESS)
+      : undefined;
+
     const move = (ev: PointerEvent) => {
       y = ev.clientY;
-      if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > SLOP) cleanup();
+      const dx = ev.clientX - x0;
+      const dy = ev.clientY - y0;
+      if (!glisse) {
+        if (peutGlisser && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+          glisse = true;
+          clearTimeout(timer);
+          tiroir!.style.transition = "none";
+          if (ligne) ligne.dataset.swiping = "true";
+        } else if (Math.hypot(dx, dy) > SLOP) {
+          cleanup();
+          return;
+        } else {
+          return;
+        }
+      }
+      // Au-delà de la largeur des actions, la ligne résiste.
+      const brut = depart + dx;
+      decalage = brut < -largeur ? -largeur + (brut + largeur) * 0.25 : Math.min(0, brut);
+      tiroir!.style.transform = `translateX(${largeur + decalage}px)`;
     };
+
+    const fin = () => {
+      if (glisse && tiroir) {
+        swallowClick.current = true;
+        // Le clic qui suit le lâcher arrive tout de suite ; ensuite on oublie.
+        window.setTimeout(() => (swallowClick.current = false), 0);
+        tiroir.style.transition = "";
+        tiroir.style.transform = "";
+        if (ligne) delete ligne.dataset.swiping;
+        setOpenId(decalage < -largeur / 2 ? item.id : null);
+      }
+      cleanup();
+    };
+
     const cleanup = () => {
       clearTimeout(timer);
       window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", cleanup);
-      window.removeEventListener("pointercancel", cleanup);
+      window.removeEventListener("pointerup", fin);
+      window.removeEventListener("pointercancel", fin);
     };
     window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", cleanup);
-    window.addEventListener("pointercancel", cleanup);
+    window.addEventListener("pointerup", fin);
+    window.addEventListener("pointercancel", fin);
   };
 
   /*
@@ -302,15 +408,65 @@ export function Queue({
                   ? "past"
                   : "next";
           const mobile = movable(index);
+          const actions = actionsOf(index);
+          const ouverte = openId === item.id;
 
           return (
-            <li key={item.id} className="queue__item" data-state={etat} data-movable={mobile}>
+            <li
+              key={item.id}
+              className="queue__item"
+              data-id={item.id}
+              data-state={etat}
+              data-movable={mobile}
+              data-open={ouverte}
+              data-flash={flash === item.id}
+              style={{ "--tray": `${actions.length * ACTION_W}px` } as React.CSSProperties}
+            >
+              {/* Les actions, derrière la ligne : le glissement les découvre. */}
+              {actions.length > 0 && (
+                <div className="queue__tray">
+                  {actions.includes("next") && (
+                    <button
+                      className="queue__action queue__action--next"
+                      tabIndex={ouverte ? 0 : -1}
+                      onClick={() => agir("next", index, item)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M3 5.5v9L10 10zM12 6h9v2h-9zm0 5h9v2h-9zm-9 5h18v2H3z" fill="currentColor" />
+                      </svg>
+                      <span>Ensuite</span>
+                    </button>
+                  )}
+                  {actions.includes("remove") && (
+                    <button
+                      className="queue__action queue__action--remove"
+                      tabIndex={ouverte ? 0 : -1}
+                      onClick={() => agir("remove", index, item)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path
+                          d="M9 3h6l1 2h4v2H4V5h4zm-3 6h12l-1 12H7zm4 2v8h1.6v-8zm2.4 0v8H14v-8z"
+                          fill="currentColor"
+                        />
+                      </svg>
+                      <span>Retirer</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              <div className="queue__row">
               <button
                 className="queue__pick"
                 onPointerDown={(e) => press(index, e)}
                 onClick={() => {
                   if (swallowClick.current) {
                     swallowClick.current = false;
+                    return;
+                  }
+                  // Des actions sont ouvertes : toucher ailleurs les referme.
+                  if (openId !== null) {
+                    setOpenId(null);
                     return;
                   }
                   onPick(item);
@@ -320,7 +476,7 @@ export function Queue({
               >
                 <span
                   className="queue__art"
-                  style={{ backgroundImage: item.image ? `url("${item.image}")` : undefined }}
+                  style={{ backgroundImage: item.image ? `url("${sharpen(item.image, 120)}")` : undefined }}
                 >
                   {/* Le triangle n'apparaît qu'au survol : la pochette reste
                       lisible, mais on voit que la ligne est une commande. */}
@@ -336,6 +492,23 @@ export function Queue({
                   {item.duration > 0 ? formatTime(item.duration) : ""}
                 </span>
               </button>
+
+              {actions.length > 0 && (
+                <button
+                  className="queue__more"
+                  aria-label={`Actions pour « ${item.name} »`}
+                  aria-expanded={ouverte}
+                  title="Écouter ensuite, retirer…"
+                  onClick={() => setOpenId((o) => (o === item.id ? null : item.id))}
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M6 10.2a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm6 0a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6zm6 0a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z"
+                      fill="currentColor"
+                    />
+                  </svg>
+                </button>
+              )}
 
               {mobile && (
                 <button
@@ -363,6 +536,7 @@ export function Queue({
                   </svg>
                 </button>
               )}
+              </div>
             </li>
           );
         })}

@@ -44,10 +44,10 @@ const VINYLS: [VinylStyle, string][] = [
  */
 const MOTIFS: [MarbleMotif, string][] = [
   ["coulee", "Coulée"],
-  ["tourbillon", "Tourbillon"],
-  ["remous", "Remous"],
-  ["agate", "Agate"],
   ["nebuleuse", "Nébuleuse"],
+  ["nuit", "Nuit"],
+  ["brume", "Brume"],
+  ["aurore", "Aurore"],
 ];
 
 /** Les matières qui se teintent : les autres ignorent la couleur choisie. */
