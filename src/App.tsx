@@ -470,6 +470,34 @@ export function App({ embedded }: { embedded?: HassClient } = {}) {
     );
   }, [palette, settings.vinylTint]);
 
+  // ------------------------------------------------------------- place de la platine
+
+  /*
+   * Quand un volet s'ouvre, la platine se décale pour lui faire place. Sur un
+   * écran large ça suffisait ; sur un iPad, presque carré, l'ensemble ne tenait
+   * plus à côté d'un volet de 400 points et la file recouvrait le disque. On
+   * calcule donc la réduction qui le fait tenir — une seule échelle, appliquée
+   * par le CSS en même temps que le décalage, donc animée avec lui.
+   */
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const ajuster = () => {
+      const disque = root.querySelector<HTMLElement>(".disc");
+      if (!disque) return;
+      const largeur = root.clientWidth;
+      const volet = Math.min(400, largeur * 0.88);
+      // Emprise mesurée de l'ensemble : 1,96 diamètre, plus un peu d'air.
+      const emprise = disque.offsetWidth * 1.96 + 48;
+      const echelle = Math.max(0.55, Math.min(1, (largeur - volet) / emprise));
+      root.style.setProperty("--stage-fit", echelle.toFixed(3));
+    };
+    ajuster();
+    const observateur = new ResizeObserver(ajuster);
+    observateur.observe(root);
+    return () => observateur.disconnect();
+  }, []);
+
   // ------------------------------------------------------------- motif du marbré
 
   /*

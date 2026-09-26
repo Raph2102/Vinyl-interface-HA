@@ -233,6 +233,15 @@ platine emprunte le même chemin : le superviseur délivre une session d'ingress
 et le WebSocket de Music Assistant s'ouvre au nom de la personne connectée. Rien
 à configurer, et les changements arrivent en direct.
 
+**La platine se mesure sur sa propre place, pas sur l'écran.** Toutes les
+tailles se rapportent à la zone que Home Assistant lui laisse, barre latérale
+déduite (unités de conteneur CSS). Le disque prend la plus grande taille que
+permettent à la fois la largeur et la hauteur : sur un écran 16:10 c'est la
+hauteur qui borne, sur un iPad presque 4:3 c'est la largeur. En portrait,
+pochette et disque passent en diagonale ; un volet ouvert réduit la platine
+juste assez pour qu'elle tienne à côté. Sur écran tactile, texte et boutons
+grandissent d'un cran.
+
 **La position de lecture est interpolée.** Home Assistant n'envoie pas un flux
 continu : il envoie une position figée accompagnée de `media_position_updated_at`.
 Le mouvement du bras et le compteur sont calculés localement à partir de ces
